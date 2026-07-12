@@ -288,7 +288,7 @@ export default function SearchingAnimation({
             }}
           >
             <p className="text-[10px] tracking-[0.28em] text-archive-gold/70">MANUAL CONFIRM</p>
-            <h2 className="mt-2 font-serif text-lg text-archive-paper">未能自动辨认歌曲</h2>
+            <h2 className="mt-2 font-serif text-lg text-archive-paper">未能自动辨认歌曲。请留一首你印象最深的歌</h2>
             <p className="mt-2 font-serif text-[12px] leading-relaxed text-archive-paper/65">
               {identifyMessage
                 || '可能音频太过嘈杂或片段太短，暂时难以辨认出歌曲。请手动填写歌名与歌手，我们再去曲库查找。'}

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   getSimilarQQMusicSongs,
+  isUsableIntentTrack,
+  mapEmotionTagToTrackType,
   recommendQQMusicTracks,
   searchQQMusicByIntent,
   searchQQMusicSongs,
@@ -356,15 +358,40 @@ test('builds music_skill cmd_params and normalizes play_command list', async () 
   assert.equal(command.play_item_limit, command.play_item_cnt);
   assert.equal(command.app_info.name, 'QQ音乐失物招领处');
   assert.equal(command.request.request_id.startsWith('lost-found-'), true);
-  assert.equal(command.original_question, '推荐适合不舍情绪的歌曲');
+  assert.equal(command.original_question, '推荐适合不舍情绪的华语歌曲');
   assert.equal(command.music_skill_mode, '1');
   assert.equal(command.intent.name, 'SearchSong');
   assert.deepEqual(command.intent.slots, [{
     name: 'TrackType',
-    value: '不舍',
+    value: '伤感',
     intent_type: 0,
   }]);
   assert.equal(tracks[0].title, '归途');
   assert.equal(tracks[0].artist, '某歌手');
   assert.equal(url.searchParams.has('app_key'), false);
+});
+
+test('maps product emotion tags to official TrackType moods', () => {
+  assert.equal(mapEmotionTagToTrackType('不舍'), '伤感');
+  assert.equal(mapEmotionTagToTrackType('热烈'), '快乐');
+  assert.equal(mapEmotionTagToTrackType('怀旧'), '怀旧');
+  assert.equal(mapEmotionTagToTrackType('未知标签'), '伤感');
+});
+
+test('rejects Cyrillic or non-CJK intent tracks', () => {
+  assert.equal(isUsableIntentTrack({
+    title: '归途',
+    artist: '陈慧娴',
+    playUrl: '',
+  }), true);
+  assert.equal(isUsableIntentTrack({
+    title: 'Здравствуй',
+    artist: 'Unknown',
+    playUrl: 'https://example.test/a.mp3',
+  }), false);
+  assert.equal(isUsableIntentTrack({
+    title: 'Hello',
+    artist: 'World',
+    playUrl: 'https://example.test/a.mp3',
+  }), false);
 });

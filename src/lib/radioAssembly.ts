@@ -3,6 +3,8 @@ import type { ArtistPrefetchResult } from './artistPrefetch.ts'
 import {
   getSimilarQQMusicSongs,
   getQQMusicSingerTrackAtPercentile,
+  isUsableIntentTrack,
+  mapEmotionTagToTrackType,
   searchQQMusicByIntent,
   searchQQMusicSongs,
   type MusicTrack,
@@ -387,7 +389,15 @@ export async function assembleRadio(
     deps.intent(tags[0] ?? '温柔', qqConfig),
   ])
   const similar = unique(similarResult.status === 'fulfilled' ? similarResult.value : [])
-  const intent = unique(intentResult.status === 'fulfilled' ? intentResult.value : [])
+  let intent = unique(
+    (intentResult.status === 'fulfilled' ? intentResult.value : []).filter(isUsableIntentTrack)
+  )
+  // music_skill may return empty or junk for unknown TrackType; fall back to 华语 mood search.
+  if (intent.length === 0) {
+    const mood = mapEmotionTagToTrackType(tags[0] ?? '温柔')
+    const searched = await deps.search(`华语 ${mood}`, qqConfig).catch(() => [])
+    intent = unique(searched.filter(isUsableIntentTrack)).slice(0, 8)
+  }
   const local = localTracks(artist)
 
   const provisionalUsed = unique([identified, ...catalog.slice(0, 2), ...similar.slice(0, 1)])

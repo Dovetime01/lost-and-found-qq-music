@@ -175,3 +175,46 @@ test('uses stable five-line copy when LLM is unavailable', async () => {
   assert.equal(result.recommendLines.length, 5);
   assert.equal(result.steps, result.playlist);
 });
+
+test('falls back to mood search when intent returns Cyrillic junk', async () => {
+  const calls = [];
+  const result = await assembleRadio({
+    anchor: {
+      id: '1001',
+      songMid: 'anchor-mid',
+      title: '普通朋友',
+      artist: '陶喆',
+      source: 'qq-music',
+      recognitionSource: 'acrcloud',
+    },
+    artistCatalog: {
+      artist: '陶喆',
+      singerMid: 'singer-mid',
+      singerId: '4558',
+      topTracks: [
+        track('hot-1', '普通朋友'),
+        track('hot-2', '爱很简单'),
+        track('hot-3', '蝴蝶'),
+      ],
+      source: 'qq-music',
+      ready: true,
+    },
+    emotionTags: ['不舍'],
+    concertInfo,
+  }, {}, {
+    similar: async () => [track('sim-1', '爱到无路可退', '彭佳慧')],
+    intent: async () => [{
+      ...track('junk-1', 'Здравствуй', 'Unknown'),
+      playUrl: 'https://example.test/broken.mp3',
+    }],
+    search: async (query) => {
+      calls.push(query);
+      return [track('mood-1', '千千阙歌', '陈慧娴')];
+    },
+    coldTrack: async () => track('cold-1', '今天你要嫁给我'),
+  });
+
+  assert.ok(calls.some((query) => String(query).includes('华语')));
+  assert.equal(result.playlist[4].title, '千千阙歌');
+  assert.equal(result.playlist[4].artist, '陈慧娴');
+});

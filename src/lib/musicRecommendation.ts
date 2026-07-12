@@ -316,6 +316,59 @@ export interface MusicIntentRequest {
   originalQuestion?: string
 }
 
+/**
+ * Product emotion tags → QQ Music `TrackType` values.
+ * Official docs list mood/scene/era/style/region examples (e.g. 伤感, 开车, 民谣, 欧美).
+ * Free-form product tags like「不舍」are not valid TrackType and can return junk.
+ */
+const EMOTION_TO_TRACK_TYPE: Record<string, string> = {
+  不舍: '伤感',
+  遗憾: '伤感',
+  忧伤: '伤感',
+  释然: '伤感',
+  修复: '伤感',
+  温柔: '伤感',
+  怀旧: '怀旧',
+  回忆: '怀旧',
+  青春: '怀旧',
+  热烈: '快乐',
+  释放: '快乐',
+  快乐: '快乐',
+  共鸣: '快乐',
+  自我: '流行',
+}
+
+const DEFAULT_TRACK_TYPE = '伤感'
+
+export function mapEmotionTagToTrackType(emotionTag: string) {
+  const tag = emotionTag.trim()
+  if (!tag) return DEFAULT_TRACK_TYPE
+  return EMOTION_TO_TRACK_TYPE[tag] ?? DEFAULT_TRACK_TYPE
+}
+
+function hasCjk(text: string) {
+  return /[\u4e00-\u9fff]/.test(text)
+}
+
+function hasCyrillic(text: string) {
+  return /[\u0400-\u04ff]/i.test(text)
+}
+
+/** Drop intent hits that look like wrong-locale / unplayable junk. */
+export function isUsableIntentTrack(track: Pick<MusicTrack, 'title' | 'artist' | 'playUrl' | 'tryUrl'>) {
+  const title = track.title?.trim() ?? ''
+  const artist = track.artist?.trim() ?? ''
+  if (!title || !artist) return false
+  if (hasCyrillic(title) || hasCyrillic(artist)) return false
+  if (!hasCjk(title) && !hasCjk(artist)) return false
+  return true
+}
+
+function preferPlayableIntentTracks(tracks: MusicTrack[]) {
+  const playable = tracks.filter((track) => Boolean(track.playUrl || track.tryUrl))
+  return playable.length > 0 ? playable : tracks
+}
+
 function requireQQMusicConfig(config: QQMusicConfig) {
   if (!hasQQMusicConfig(config)) throw new Error('QQ Music configuration is incomplete')
 }
@@ -372,9 +425,10 @@ export async function searchQQMusicByIntent(
   if (!tag) return []
   if (!config.openId || !config.accessToken) return []
 
+  const trackType = mapEmotionTagToTrackType(tag)
   const limit = Math.max(1, Math.min(20, Math.floor(request.limit ?? 10)))
   const requestId = request.requestId ?? `lost-found-${Date.now()}`
-  const originalQuestion = request.originalQuestion ?? `推荐适合${tag}情绪的歌曲`
+  const originalQuestion = request.originalQuestion ?? `推荐适合${tag}情绪的华语歌曲`
   const params = buildQQMusicBaseParams('music_skill', config)
   params.set('opi_protocol_version', '1')
   params.set('cms_type', '0')
@@ -394,12 +448,13 @@ export async function searchQQMusicByIntent(
       name: 'SearchSong',
       slots: [{
         name: 'TrackType',
-        value: tag,
+        value: trackType,
         intent_type: 0,
       }],
     },
   }))
-  return fetchQQMusicTracks(params, tag, 'music skill', config)
+  const tracks = await fetchQQMusicTracks(params, trackType, 'music skill', config)
+  return preferPlayableIntentTracks(tracks.filter(isUsableIntentTrack))
 }
 
 function describeQQMusicPayloadError(payload: unknown, operation: string) {
