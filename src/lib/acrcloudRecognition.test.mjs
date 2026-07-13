@@ -54,7 +54,7 @@ test('falls back to humming candidates when music metadata is empty', async () =
           title: '恋人',
           artists: [{ name: '李荣浩' }],
           album: { name: '耳朵' },
-          score: 79,
+          score: 0.79,
           play_offset_ms: 500,
         }],
       },

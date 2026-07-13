@@ -41,6 +41,15 @@ function number(value: unknown) {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
+function confidence(value: unknown, recognitionType: AcrCloudRecognitionType) {
+  const parsed = number(value)
+  if (parsed === undefined) return undefined
+  // ACRCloud returns music scores on a 0–100 scale, but humming scores on 0–1.
+  return recognitionType === 'humming' && parsed >= 0 && parsed <= 1
+    ? parsed * 100
+    : parsed
+}
+
 function normalizeHost(host: string) {
   return host.replace(/^https?:\/\//i, '').replace(/\/+$/, '')
 }
@@ -73,7 +82,7 @@ function parseCandidates(
       title,
       artist,
       album: text(song.album?.name) || undefined,
-      confidence: number(song.score),
+      confidence: confidence(song.score, recognitionType),
       playOffsetMs: number(song.play_offset_ms),
       recognitionType,
     }]
