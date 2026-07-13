@@ -6,6 +6,9 @@ const nextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
+  outputFileTracingIncludes: {
+    '/api/download-sample': ['./sample/**/*'],
+  },
 }
 
 module.exports = nextConfig

@@ -152,12 +152,13 @@ export default function QQMusicLoginGate({
       <div className="absolute bottom-0 left-0 right-0 h-[32%] bg-[linear-gradient(180deg,rgba(32,23,18,0),#211711)]" />
       <div className="paper-texture absolute inset-0 opacity-20" />
 
-      <motion.section
-        initial={{ opacity: 0, y: 18 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.7, ease: 'easeOut' }}
-        className="relative z-10 grid w-full max-w-[920px] overflow-hidden border border-[#C9A46A]/30 bg-[#11100e]/90 shadow-[0_35px_100px_rgba(0,0,0,.65)] backdrop-blur md:grid-cols-[1.05fr_.95fr]"
-      >
+      <div className="relative z-10 flex w-full max-w-[920px] flex-col items-center">
+        <motion.section
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, ease: 'easeOut' }}
+          className="grid w-full overflow-hidden border border-[#C9A46A]/30 bg-[#11100e]/90 shadow-[0_35px_100px_rgba(0,0,0,.65)] backdrop-blur md:grid-cols-[1.05fr_.95fr]"
+        >
         <div className="flex min-h-[310px] flex-col justify-between border-b border-[#C9A46A]/20 p-7 md:min-h-[570px] md:border-b-0 md:border-r md:p-12">
           <div>
             <div className="mb-8 flex items-center gap-3 text-[10px] tracking-[0.28em] text-[#C9A46A]">
@@ -261,7 +262,19 @@ export default function QQMusicLoginGate({
             )}
           </AnimatePresence>
         </div>
-      </motion.section>
+        </motion.section>
+
+        <p className="mt-10 whitespace-nowrap text-center text-base leading-7 text-[#E9DFC8]/40">
+          点击
+          <a
+            href="/api/download-sample"
+            className="text-[#C9A46A] underline underline-offset-2 transition hover:text-[#E9DFC8]"
+          >
+            此处
+          </a>
+          下载我们提供的示例文件，如果你有演唱会相关的照片和视频也可以使用自己的，视频要求在&nbsp;4-5MB&nbsp;以下
+        </p>
+      </div>
     </main>
   )
 }
