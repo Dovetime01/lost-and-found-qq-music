@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { searchQQMusicSongs, type MusicTrack } from '@/lib/musicRecommendation'
+import { enrichTracksWithPlayUrls, searchQQMusicSongs, type MusicTrack } from '@/lib/musicRecommendation'
 import type { SongAnchor } from '@/lib/pipelineTypes'
 import { qqMusicConfigForRequest } from '@/lib/qqMusicRouteConfig'
 
@@ -46,7 +46,8 @@ export async function POST(request: Request) {
     }
 
     const query = [title, artist].filter(Boolean).join(' ')
-    const tracks = await searchQQMusicSongs(query, qqMusicConfigForRequest(request))
+    const qqConfig = qqMusicConfigForRequest(request)
+    const tracks = await searchQQMusicSongs(query, qqConfig)
     const mapped = bestQQTrack(tracks, title, artist) ?? tracks[0]
     if (!mapped) {
       return NextResponse.json({
@@ -56,8 +57,17 @@ export async function POST(request: Request) {
       })
     }
 
+    const [hydrated] = await enrichTracksWithPlayUrls([mapped], qqConfig)
+    console.info('[resolve-song] mapped', {
+      title: hydrated.title,
+      artist: hydrated.artist,
+      hasPlayUrl: Boolean(hydrated.playUrl),
+      hasTryUrl: Boolean(hydrated.tryUrl),
+      urlPreview: (hydrated.playUrl || hydrated.tryUrl || '').slice(0, 96) || null,
+    })
+
     return NextResponse.json({
-      anchor: trackToAnchor(mapped),
+      anchor: trackToAnchor(hydrated),
       source: 'manual+qq-music',
       message: '已根据手动输入映射到 QQ 音乐曲目。',
     })

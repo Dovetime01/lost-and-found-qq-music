@@ -328,6 +328,8 @@ export function useMemoryPipeline() {
         title: step.title,
         artist: step.artist,
         source: step.source ?? '',
+        playUrl: step.playUrl ? 'yes' : '',
+        tryUrl: step.tryUrl ? 'yes' : '',
       })))
       console.groupEnd()
       update((current) => ({ ...current, claim, radio, readiness: 'all-ready' }))

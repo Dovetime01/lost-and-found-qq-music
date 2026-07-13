@@ -1,9 +1,9 @@
 'use client'
 
 import { motion, useReducedMotion } from 'framer-motion'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import StarrySeaBackground from '@/components/StarrySeaBackground'
-import { stopBgmForever } from '@/lib/bgm'
+import { useStableAudio } from '@/hooks/useStableAudio'
 import type { MemoryProfile } from '@/lib/analysis'
 import type { RadioPlaylistResult, RadioStep } from '@/lib/pipelineTypes'
 
@@ -38,43 +38,35 @@ function formatTime(seconds: number) {
 
 export default function PlaybackScreen({ profile, radio, onNext }: PlaybackScreenProps) {
   const reduceMotion = useReducedMotion()
-  const audioRef = useRef<HTMLAudioElement | null>(null)
   const playlist = (radio?.steps?.length ? radio.steps : fallbackSteps(profile)).slice(0, 5)
   const [index, setIndex] = useState(0)
-  const [playing, setPlaying] = useState(false)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(0)
-  const [audioError, setAudioError] = useState('')
   const song = playlist[index]
   const playUrl = song?.playUrl || song?.tryUrl
-  const canPlay = Boolean(playUrl) && !audioError
   const isPreview = Boolean(song?.tryUrl && !song?.playUrl)
 
+  const handleEnded = useCallback(() => {
+    setIndex((current) => (current < playlist.length - 1 ? current + 1 : current))
+  }, [playlist.length])
+
+  const { playing, canPlay, currentTime, duration, toggle, seek } = useStableAudio(playUrl, {
+    onEnded: handleEnded,
+  })
+
   useEffect(() => {
-    setPlaying(false)
-    setCurrentTime(0)
-    setDuration(0)
-    setAudioError('')
-  }, [index, playUrl])
+    console.info('[播放] radio track', {
+      index,
+      title: song?.title ?? null,
+      artist: song?.artist ?? null,
+      hasPlayUrl: Boolean(song?.playUrl),
+      hasTryUrl: Boolean(song?.tryUrl),
+      playable: Boolean(playUrl),
+      urlPreview: playUrl ? playUrl.slice(0, 96) : null,
+    })
+  }, [index, playUrl, song?.title, song?.artist, song?.playUrl, song?.tryUrl])
 
   const changeSong = (delta: number) => {
     if (!playlist.length) return
     setIndex((current) => (current + delta + playlist.length) % playlist.length)
-  }
-
-  const toggle = async () => {
-    const audio = audioRef.current
-    if (!audio || !canPlay) return
-    if (!audio.paused) {
-      audio.pause()
-      return
-    }
-    try {
-      await audio.play()
-      stopBgmForever()
-    } catch {
-      setAudioError('playback-failed')
-    }
   }
 
   if (!song) {
@@ -92,28 +84,6 @@ export default function PlaybackScreen({ profile, radio, onNext }: PlaybackScree
   return (
     <main className="relative min-h-full overflow-hidden bg-[#06080e] px-6 pb-6 pt-5 text-archive-paper">
       <StarrySeaBackground />
-      {playUrl && (
-        <audio
-          ref={audioRef}
-          src={playUrl}
-          preload="metadata"
-          onPlay={() => {
-            setPlaying(true)
-            stopBgmForever()
-          }}
-          onPause={() => setPlaying(false)}
-          onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
-          onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
-          onEnded={() => {
-            setPlaying(false)
-            if (index < playlist.length - 1) setIndex((value) => value + 1)
-          }}
-          onError={() => {
-            setPlaying(false)
-            setAudioError('playback-failed')
-          }}
-        />
-      )}
 
       <header className="relative z-10 text-center">
         <p className="text-[10px] tracking-[0.3em] text-[#7ECFD3]/70">RETURN RADIO · {index + 1}/{playlist.length}</p>
@@ -144,10 +114,7 @@ export default function PlaybackScreen({ profile, radio, onNext }: PlaybackScree
           min={0}
           max={duration || 0}
           value={Math.min(currentTime, duration || 0)}
-          onChange={(event) => {
-            if (!audioRef.current) return
-            audioRef.current.currentTime = Number(event.target.value)
-          }}
+          onChange={(event) => seek(Number(event.target.value))}
           disabled={!playUrl || !duration}
           aria-label="播放进度"
           className="w-full accent-[#7ECFD3]"
@@ -162,7 +129,7 @@ export default function PlaybackScreen({ profile, radio, onNext }: PlaybackScree
         <button type="button" onClick={() => changeSong(-1)} disabled={playlist.length < 2} aria-label="上一首" className="text-xl disabled:opacity-25">‹‹</button>
         <button
           type="button"
-          onClick={toggle}
+          onClick={() => { void toggle() }}
           disabled={!canPlay}
           aria-label={playing ? '暂停' : '播放'}
           className="h-14 w-14 rounded-full bg-[#7ECFD3] text-xl text-[#0D1B2A] shadow-[0_0_30px_rgba(126,207,211,0.45)] disabled:cursor-not-allowed disabled:border disabled:border-archive-paper/15 disabled:bg-archive-paper/10 disabled:text-archive-paper/25 disabled:shadow-none"

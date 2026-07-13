@@ -2,7 +2,7 @@ import { extname } from 'node:path'
 import { NextResponse } from 'next/server'
 import { recognizeAcrCloudWav, type AcrCloudSongCandidate } from '@/lib/acrcloudRecognition'
 import { extractVideoRecognitionWindows, mediaProcessingLimits } from '@/lib/mediaProcessing'
-import { searchQQMusicSongs, type MusicTrack } from '@/lib/musicRecommendation'
+import { enrichTracksWithPlayUrls, searchQQMusicSongs, type MusicTrack } from '@/lib/musicRecommendation'
 import type { SongAnchor } from '@/lib/pipelineTypes'
 import { qqMusicConfigForRequest } from '@/lib/qqMusicRouteConfig'
 
@@ -196,11 +196,12 @@ export async function POST(request: Request) {
     })
 
     stage = 'qq-music'
+    const qqConfig = qqMusicConfigForRequest(request)
     const mappedCandidates = await Promise.all(
       trustedCandidates.slice(0, 3).map(async (candidate) => {
         const tracks = await searchQQMusicSongs(
           `${candidate.title} ${candidate.artist}`.trim(),
-          qqMusicConfigForRequest(request)
+          qqConfig
         ).catch((error) => {
           console.warn('[ACRCloud] QQ Music search failed', {
             title: candidate.title,
@@ -209,7 +210,11 @@ export async function POST(request: Request) {
           })
           return []
         })
-        return bestQQTrack(tracks, candidate.title, candidate.artist)
+        const best = bestQQTrack(tracks, candidate.title, candidate.artist)
+        if (!best) return undefined
+        if (best.playUrl || best.tryUrl) return best
+        const [hydrated] = await enrichTracksWithPlayUrls([best], qqConfig)
+        return hydrated
       })
     )
     const mapped = mappedCandidates.find(Boolean)
@@ -225,6 +230,7 @@ export async function POST(request: Request) {
         songMid: mapped.songMid,
         hasPlayUrl: Boolean(mapped.playUrl),
         hasTryUrl: Boolean(mapped.tryUrl),
+        playUrlPreview: (mapped.playUrl || mapped.tryUrl || '').slice(0, 96) || null,
         elapsedMs: Date.now() - startedAt,
       })
       return NextResponse.json({

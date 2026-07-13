@@ -231,13 +231,15 @@ export default function StarrySeaBackdrop() {
     document.addEventListener('visibilitychange', onVisibility)
 
     let frame = 0
-    const clock = new THREE.Clock()
+    const timer = new THREE.Timer()
+    timer.connect(document)
 
-    const tick = () => {
+    const tick = (timestamp: number) => {
       frame = window.requestAnimationFrame(tick)
+      timer.update(timestamp)
       if (!visible) return
 
-      const t = clock.getElapsedTime()
+      const t = timer.getElapsed()
       const ease = reduceMotion ? 1 : 0.04
       smoothMouse.x += (targetMouse.x - smoothMouse.x) * ease
       smoothMouse.y += (targetMouse.y - smoothMouse.y) * ease
@@ -254,10 +256,11 @@ export default function StarrySeaBackdrop() {
       renderer.render(scene, camera)
     }
 
-    tick()
+    tick(performance.now())
 
     return () => {
       window.cancelAnimationFrame(frame)
+      timer.dispose()
       window.removeEventListener('pointermove', onPointerMove)
       window.removeEventListener('resize', onResize)
       document.removeEventListener('visibilitychange', onVisibility)

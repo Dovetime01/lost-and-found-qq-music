@@ -1,9 +1,9 @@
 'use client'
 
 import { motion, useReducedMotion } from 'framer-motion'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect } from 'react'
 import StarrySeaBackground from '@/components/StarrySeaBackground'
-import { stopBgmForever } from '@/lib/bgm'
+import { useStableAudio } from '@/hooks/useStableAudio'
 import type { PipelineReadiness } from '@/hooks/useMemoryPipeline'
 import type { SongAnchor } from '@/lib/pipelineTypes'
 
@@ -21,33 +21,21 @@ export default function ListenFirstScreen({
   onNext,
 }: ListenFirstScreenProps) {
   const reduceMotion = useReducedMotion()
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const [playing, setPlaying] = useState(false)
-  const [playbackFailed, setPlaybackFailed] = useState(false)
   const playableUrl = anchor?.playUrl || anchor?.tryUrl
-  const canPlay = Boolean(playableUrl) && !playbackFailed
+  const { playing, canPlay, toggle } = useStableAudio(playableUrl)
   const isPreview = Boolean(anchor?.tryUrl && !anchor?.playUrl)
   const canContinue = readiness === 'all-ready'
 
   useEffect(() => {
-    setPlaying(false)
-    setPlaybackFailed(false)
-  }, [playableUrl])
-
-  const togglePlayback = async () => {
-    const audio = audioRef.current
-    if (!audio || !canPlay) return
-    if (!audio.paused) {
-      audio.pause()
-      return
-    }
-    try {
-      await audio.play()
-      stopBgmForever()
-    } catch {
-      setPlaybackFailed(true)
-    }
-  }
+    console.info('[播放] listen-first track', {
+      title: anchor?.title ?? null,
+      artist: anchor?.artist ?? null,
+      hasPlayUrl: Boolean(anchor?.playUrl),
+      hasTryUrl: Boolean(anchor?.tryUrl),
+      playable: Boolean(playableUrl),
+      urlPreview: playableUrl ? playableUrl.slice(0, 96) : null,
+    })
+  }, [playableUrl, anchor?.title, anchor?.artist, anchor?.playUrl, anchor?.tryUrl])
 
   const buttonText = readiness === 'all-ready'
     ? '档案已整理好，查看认领单'
@@ -63,23 +51,6 @@ export default function ListenFirstScreen({
       className="relative flex min-h-full flex-col items-center overflow-hidden bg-[#06080e] px-6 pb-8 pt-8 text-center text-archive-paper"
     >
       <StarrySeaBackground />
-      {playableUrl && (
-        <audio
-          ref={audioRef}
-          src={playableUrl}
-          preload="metadata"
-          onPlay={() => {
-            setPlaying(true)
-            stopBgmForever()
-          }}
-          onPause={() => setPlaying(false)}
-          onEnded={() => setPlaying(false)}
-          onError={() => {
-            setPlaying(false)
-            setPlaybackFailed(true)
-          }}
-        />
-      )}
 
       <header className="relative z-10">
         <p className="text-[10px] tracking-[0.34em] text-archive-gold/65">LISTEN FIRST</p>
@@ -118,7 +89,7 @@ export default function ListenFirstScreen({
         ) : null}
         <button
           type="button"
-          onClick={togglePlayback}
+          onClick={() => { void toggle() }}
           disabled={!canPlay}
           className="mt-4 h-12 w-12 rounded-full border border-archive-gold/40 bg-archive-gold text-lg text-[#0D0D0D] shadow-[0_0_25px_rgba(201,164,106,0.25)] disabled:cursor-not-allowed disabled:border-archive-paper/15 disabled:bg-archive-paper/10 disabled:text-archive-paper/25 disabled:shadow-none"
           aria-label={playing ? '暂停试听' : '播放试听'}

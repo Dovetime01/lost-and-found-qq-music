@@ -447,14 +447,31 @@ async function fetchQQMusicTracks(
     const tracks = extractRawTracks(payload)
       .map((track, index) => normalizeTrack(track, index, query))
       .filter((track): track is MusicTrack => Boolean(track))
+    const playableCount = tracks.filter((track) => Boolean(track.playUrl || track.tryUrl)).length
     logQQMusicResponse(operation, params, startedAt, {
       ok: true,
       httpStatus: response.status,
       ret: qqMusicPayloadRet(payload),
       trackCount: tracks.length,
       sample: tracks.slice(0, 5).map((track) => `${track.title}-${track.artist}`),
-      playableCount: tracks.filter((track) => Boolean(track.playUrl || track.tryUrl)).length,
+      playableCount,
     })
+    if (tracks.length > 0 && playableCount === 0) {
+      const rawSample = extractRawTracks(payload)[0] as Record<string, unknown> | undefined
+      console.warn('[QQ音乐] no play/try URLs in response', {
+        operation,
+        opi_cmd: qqMusicCmd(params),
+        hasOpenId: Boolean(params.get('qqmusic_open_id')),
+        hasAccessToken: Boolean(params.get('qqmusic_access_token')),
+        rawKeys: rawSample ? Object.keys(rawSample).slice(0, 40) : [],
+        try_30s_url: typeof rawSample?.try_30s_url === 'string' ? rawSample.try_30s_url.slice(0, 80) : rawSample?.try_30s_url ?? null,
+        song_play_url: typeof rawSample?.song_play_url === 'string' ? rawSample.song_play_url.slice(0, 80) : rawSample?.song_play_url ?? null,
+        playable: rawSample?.playable ?? null,
+        try_playable: rawSample?.try_playable ?? null,
+        unplayable_code: rawSample?.unplayable_code ?? null,
+        unplayable_msg: rawSample?.unplayable_msg ?? null,
+      })
+    }
     return tracks
   } catch (error) {
     logQQMusicResponse(operation, params, startedAt, {
@@ -857,28 +874,83 @@ export async function searchQQMusicSongs(
   config: QQMusicConfig = {}
 ): Promise<MusicTrack[]> {
   if (!hasQQMusicConfig(config)) return []
+  const params = buildQQMusicBaseParams('fcg_music_custom_search.fcg', config)
+  params.set('w', query)
+  params.set('p', '1')
+  params.set('num', '10')
+  params.set('t', '0')
+  return fetchQQMusicTracks(params, query, 'search', config)
+}
 
-  const fetcher = config.fetcher ?? fetch
-  const request = buildQQMusicSearchRequest(query, config)
+/**
+ * Similar/singer-info APIs often omit stream URLs. Re-search each track to fill
+ * playUrl / tryUrl when the user session can receive them.
+ */
+export async function enrichTracksWithPlayUrls(
+  tracks: MusicTrack[],
+  config: QQMusicConfig = {}
+): Promise<MusicTrack[]> {
+  if (!hasQQMusicConfig(config) || tracks.length === 0) return tracks
 
-  const response = await fetcher(request.url, {
-    method: 'GET',
-    headers: {
-      'X-QYOPI-Sign': request.sign,
-      Accept: 'application/json',
-    },
+  const enriched = await Promise.all(tracks.map(async (track) => {
+    if (track.playUrl || track.tryUrl) return track
+    const query = `${track.title} ${track.artist}`.trim()
+    if (!query) return track
+    try {
+      const found = await searchQQMusicSongs(query, config)
+      const titleKey = normalizeMatchText(track.title)
+      const artistKey = normalizeMatchText(track.artist)
+      const match = found.find((candidate) => {
+        const sameTitle = normalizeMatchText(candidate.title) === titleKey
+        const sameArtist = normalizeMatchText(candidate.artist).includes(artistKey)
+          || artistKey.includes(normalizeMatchText(candidate.artist))
+        return sameTitle && sameArtist && Boolean(candidate.playUrl || candidate.tryUrl)
+      }) ?? found.find((candidate) =>
+        normalizeMatchText(candidate.title) === titleKey
+        && Boolean(candidate.playUrl || candidate.tryUrl)
+      )
+      if (!match || !(match.playUrl || match.tryUrl)) {
+        console.warn('[QQ音乐] hydrate play URL missed', {
+          title: track.title,
+          artist: track.artist,
+          candidates: found.length,
+          playableCandidates: found.filter((item) => Boolean(item.playUrl || item.tryUrl)).length,
+        })
+        return track
+      }
+      console.info('[QQ音乐] hydrate play URL ok', {
+        title: track.title,
+        artist: track.artist,
+        hasPlayUrl: Boolean(match.playUrl),
+        hasTryUrl: Boolean(match.tryUrl),
+        urlPreview: (match.playUrl || match.tryUrl || '').slice(0, 96),
+      })
+      return {
+        ...track,
+        playUrl: match.playUrl || track.playUrl,
+        tryUrl: match.tryUrl || track.tryUrl,
+        songMid: track.songMid || match.songMid,
+        coverUrl: track.coverUrl || match.coverUrl,
+        qqMusicUrl: track.qqMusicUrl || match.qqMusicUrl,
+      }
+    } catch (error) {
+      console.warn('[QQ音乐] hydrate play URL failed', {
+        title: track.title,
+        artist: track.artist,
+        message: error instanceof Error ? error.message : String(error),
+      })
+      return track
+    }
+  }))
+
+  const before = tracks.filter((track) => Boolean(track.playUrl || track.tryUrl)).length
+  const after = enriched.filter((track) => Boolean(track.playUrl || track.tryUrl)).length
+  console.info('[QQ音乐] hydrate summary', {
+    total: tracks.length,
+    playableBefore: before,
+    playableAfter: after,
   })
-
-  if (!response.ok) {
-    throw new Error(`QQ Music search failed with status ${response.status}`)
-  }
-
-  const payload = await response.json()
-  describeQQMusicPayloadError(payload, 'search')
-
-  return extractRawTracks(payload)
-    .map((track, index) => normalizeTrack(track, index, query))
-    .filter((track): track is MusicTrack => Boolean(track))
+  return enriched
 }
 
 export async function recommendQQMusicTracks(

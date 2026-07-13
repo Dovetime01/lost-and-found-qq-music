@@ -5,6 +5,7 @@ import {
   getQQMusicSingerTrackAtPercentile,
   isUsableIntentTrack,
   mapEmotionTagToTrackType,
+  enrichTracksWithPlayUrls,
   searchQQMusicByIntent,
   searchQQMusicSongs,
   type MusicTrack,
@@ -91,7 +92,8 @@ function normalizeArtistKey(value: string) {
 
 function isSameArtist(track: MusicTrack, artist: string) {
   const expected = normalizeArtistKey(artist)
-  if (!expected || expected.includes('待确认')) return true
+  // Unknown / placeholder artists must NOT match everything — that floods Mayday locals.
+  if (!expected || expected.includes('待确认')) return false
   const actual = normalizeArtistKey(track.artist)
   return Boolean(actual) && (actual.includes(expected) || expected.includes(actual))
 }
@@ -386,12 +388,19 @@ export async function assembleRadio(
       ? input.multimodal.emotionTags
       : ['怀旧', '温柔']
   const qqConfig = config.qqMusic ?? {}
-  const artist = input.concertInfo.artist.trim()
+  const concertArtist = input.concertInfo.artist.trim()
+  const anchorArtist = input.anchor?.artist?.trim() ?? ''
+  // Prefer ticket OCR artist; if missing, fall back to the recognized song artist.
+  const artist = (concertArtist && !concertArtist.includes('待确认')
+    ? concertArtist
+    : anchorArtist) || concertArtist
   const identified = anchorTrack(input.anchor)
   const reference = similarReference(input.anchor)
 
   console.info('[归途电台] assemble start', {
     artist: artist || null,
+    concertArtist: concertArtist || null,
+    anchorArtist: anchorArtist || null,
     anchor: identified
       ? { title: identified.title, artist: identified.artist, songMid: identified.songMid ?? null, id: identified.id }
       : null,
@@ -554,6 +563,7 @@ export async function assembleRadio(
       local: localTracks(''),
     })
   }
+  tracks = await enrichTracksWithPlayUrls(tracks, qqConfig)
   const playlist = tracks.slice(0, 5).map(toStep)
   const copy = await generateCopy(playlist, tags, input.concertInfo, config)
   const usedLocal = playlist.some((step) => step.source === 'local-fallback')
@@ -589,6 +599,8 @@ export async function assembleRadio(
       title: step.title,
       artist: step.artist,
       source: step.source,
+      hasPlayUrl: Boolean(step.playUrl),
+      hasTryUrl: Boolean(step.tryUrl),
     })),
   })
 

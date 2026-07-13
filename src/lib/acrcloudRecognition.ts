@@ -120,6 +120,8 @@ function isRetryableNetworkError(error: unknown) {
     error.name === 'TypeError'
     || error.name === 'AbortError'
     || message.includes('fetch failed')
+    || message.includes('timed out')
+    || message.includes('timeout')
     || message.includes('econnrefused')
     || message.includes('enotfound')
     || message.includes('etimedout')
@@ -154,7 +156,7 @@ async function identifyAudioHttpOnce(
   form.append('timestamp', timestamp)
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), config.timeoutMs ?? 25_000)
+      const timeout = setTimeout(() => controller.abort(), config.timeoutMs ?? 25_000)
   const startedAt = Date.now()
   try {
     console.info('[ACRCloud] identify request', {
