@@ -6,9 +6,9 @@
 
 - Node.js 20 或以上
 - 本机可用的包管理器：优先使用项目自带的 pnpm（见下方）
-- Python 3.8+（用于安装 ACRCloud 识曲 SDK）
 
-不需要单独安装系统 FFmpeg，安装依赖时会带上 `ffmpeg-static`。
+不需要单独安装系统 FFmpeg，安装依赖时会带上 `ffmpeg-static`。  
+ACRCloud 识曲走服务端 HTTP Identify API，**不需要**本机 Python。
 
 ## 本地运行
 
@@ -40,15 +40,10 @@ Copy-Item .env.local.example .env.local
 
 打开 `.env.local`，按 [`.env.local.example`](.env.local.example) 填入密钥。  
 完整演示需要票根识别、多模态分析、QQ 音乐、ACRCloud、失物墙等配置项。  
-**不要把 `.env.local` 提交到公开仓库。**
+**不要把 `.env.local` 提交到公开仓库。**  
+上线 Vercel 时只配置 `ACRCLOUD_HOST` / `ACRCLOUD_ACCESS_KEY` / `ACRCLOUD_ACCESS_SECRET`（及可选 `ACRCLOUD_PROTOCOL`），**不要**配置本机 `ACRCLOUD_PYTHON_PATH`。
 
-### 3. 安装 ACRCloud SDK
-
-```bash
-pnpm setup:acrcloud
-```
-
-### 4. 启动
+### 3. 启动
 
 开发模式：
 
@@ -65,6 +60,17 @@ pnpm start
 
 浏览器打开：http://localhost:3000
 
+## 示例测试素材
+
+仓库内 [`sample/`](sample/) 提供两套可直接用于本地联调 / 体验的演示文件，按艺人分目录：
+
+| 目录 | 适用艺人 | 包含文件 |
+| --- | --- | --- |
+| [`sample/ChineseFootball/`](sample/ChineseFootball/) | Chinese Football | 票根、现场照片、视频、录音、文字歌词 |
+| [`sample/陈粒/`](sample/陈粒/) | 陈粒 | 票根、现场照片、视频、录音、文字歌词 |
+
+测试时按流程上传对应素材即可（票根 OCR、现场影像 / 录音识曲、情绪认领等）。文件仅作演示用途，请勿用于生产或对外分发。
+
 ## 常用命令
 
 | 命令 | 作用 |
@@ -76,7 +82,6 @@ pnpm start
 | `pnpm typecheck` | 类型检查 |
 | `pnpm lint` | 代码检查 |
 | `pnpm verify` | 测试 + lint + 构建 |
-| `pnpm setup:acrcloud` | 安装 ACRCloud Python SDK |
 
 ## 关于播放与 VIP 提示
 

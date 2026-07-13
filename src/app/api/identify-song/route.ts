@@ -166,12 +166,12 @@ export async function POST(request: Request) {
         : '未从现场音频中获得可靠歌曲匹配。',
     })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Song recognition failed.'
+    console.error('[ACRCloud] recognition failed', error)
     return NextResponse.json({
       anchor: null,
       candidates: [],
       source: 'fallback',
-      message: message.slice(0, 180),
+      message: '未从现场音频中获得可靠歌曲匹配。',
     })
   }
 }

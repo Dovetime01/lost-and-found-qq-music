@@ -47,7 +47,7 @@ export default function ListenFirstScreen({
       await audio.play()
       stopBgmForever()
     } catch {
-      setAudioMessage('浏览器暂未允许播放，请再次点击播放。')
+      setAudioMessage('这段试听暂时无法播放，仍会继续整理档案。')
     }
   }
 

@@ -328,7 +328,7 @@ test('builds signed similar-song URL and normalizes songlist', async () => {
 
 test('builds music_skill cmd_params and normalizes play_command list', async () => {
   let capturedUrl = '';
-  const tracks = await searchQQMusicByIntent('不舍', {
+  const tracks = await searchQQMusicByIntent({ emotionTag: '不舍', artist: '五月天' }, {
     appId: 'app-id',
     appKey: 'private-key',
     baseUrl: 'https://music.example.test/api',
@@ -342,7 +342,10 @@ test('builds music_skill cmd_params and normalizes play_command list', async () 
           return {
             data: {
               play_command: {
-                play_list: [{ mid: 'intent-mid', name: '归途', author: '某歌手' }],
+                play_list: [
+                  { mid: 'intent-mid', name: '知足', author: '五月天' },
+                  { mid: 'other-mid', name: '归途', author: '某歌手' },
+                ],
               },
             },
           };
@@ -358,16 +361,16 @@ test('builds music_skill cmd_params and normalizes play_command list', async () 
   assert.equal(command.play_item_limit, command.play_item_cnt);
   assert.equal(command.app_info.name, 'QQ音乐失物招领处');
   assert.equal(command.request.request_id.startsWith('lost-found-'), true);
-  assert.equal(command.original_question, '推荐适合不舍情绪的华语歌曲');
+  assert.equal(command.original_question, '推荐五月天适合不舍情绪的歌曲');
   assert.equal(command.music_skill_mode, '1');
   assert.equal(command.intent.name, 'SearchSong');
-  assert.deepEqual(command.intent.slots, [{
-    name: 'TrackType',
-    value: '伤感',
-    intent_type: 0,
-  }]);
-  assert.equal(tracks[0].title, '归途');
-  assert.equal(tracks[0].artist, '某歌手');
+  assert.deepEqual(command.intent.slots, [
+    { name: 'Singer', value: '五月天', intent_type: 0 },
+    { name: 'TrackType', value: '伤感', intent_type: 0 },
+  ]);
+  assert.equal(tracks.length, 1);
+  assert.equal(tracks[0].title, '知足');
+  assert.equal(tracks[0].artist, '五月天');
   assert.equal(url.searchParams.has('app_key'), false);
 });
 
@@ -378,20 +381,20 @@ test('maps product emotion tags to official TrackType moods', () => {
   assert.equal(mapEmotionTagToTrackType('未知标签'), '伤感');
 });
 
-test('rejects Cyrillic or non-CJK intent tracks', () => {
+test('rejects Cyrillic intent tracks but allows Latin artist names', () => {
   assert.equal(isUsableIntentTrack({
     title: '归途',
     artist: '陈慧娴',
     playUrl: '',
   }), true);
   assert.equal(isUsableIntentTrack({
+    title: 'Go Further',
+    artist: 'Chinese Football',
+    playUrl: '',
+  }), true);
+  assert.equal(isUsableIntentTrack({
     title: 'Здравствуй',
     artist: 'Unknown',
-    playUrl: 'https://example.test/a.mp3',
-  }), false);
-  assert.equal(isUsableIntentTrack({
-    title: 'Hello',
-    artist: 'World',
     playUrl: 'https://example.test/a.mp3',
   }), false);
 });

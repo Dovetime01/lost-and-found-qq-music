@@ -15,7 +15,9 @@ interface IPhoneMockupProps {
 
 export default function IPhoneMockup({ children, userMenu }: IPhoneMockupProps) {
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#05070c] p-8">
+    // Outer page scrolls when the locked phone is taller than the viewport.
+    // html/body stay overflow:hidden; this shell is the scroll container.
+    <div className="relative h-dvh overflow-x-hidden overflow-y-auto bg-[#05070c]">
       <StarrySeaBackdrop />
 
       {/* Soft vignette so the phone stays the focal point */}
@@ -34,15 +36,16 @@ export default function IPhoneMockup({ children, userMenu }: IPhoneMockupProps) 
         </div>
       )}
 
-      {/* iPhone 15 Pro mockup */}
+      <div className="relative z-10 flex min-h-full items-center justify-center p-8">
+      {/* iPhone 15 Pro mockup — width may shrink; height always follows 393:852 */}
       <motion.div
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.8 }}
-        className="relative z-10"
+        className="relative shrink-0"
         style={{
-          width: 'min(393px, calc(100vw - 32px))',
-          height: 'min(852px, calc(100dvh - 16px))',
+          width: 'min(393px, calc(100vw - 64px))',
+          aspectRatio: '393 / 852',
         }}
       >
         {/* Phone frame - Black Titanium */}
@@ -151,6 +154,7 @@ export default function IPhoneMockup({ children, userMenu }: IPhoneMockupProps) 
           }}
         />
       </motion.div>
+      </div>
     </div>
   )
 }

@@ -59,9 +59,12 @@ test('maps five radio steps and uses cold percentile track for step 4', async ()
         track('sim-2', '找自己'),
       ];
     },
-    intent: async () => {
+    intent: async (request) => {
       calls.push('intent');
-      return [track('intent-1', '千千阙歌', '陈慧娴')];
+      assert.equal(typeof request, 'object');
+      assert.equal(request.emotionTag, '热烈');
+      assert.equal(request.artist, '陶喆');
+      return [track('intent-1', '找自己', '陶喆')];
     },
     search: async (query) => {
       calls.push(`search:${query}`);
@@ -89,7 +92,8 @@ test('maps five radio steps and uses cold percentile track for step 4', async ()
   assert.equal(result.playlist[3].title, '今天你要嫁给我');
   assert.equal(result.playlist[3].artist, '陶喆');
   assert.match(result.playlist[3].reason ?? '', /七成|冷门/);
-  assert.equal(result.playlist[4].title, '千千阙歌');
+  assert.equal(result.playlist[4].title, '找自己');
+  assert.equal(result.playlist[4].artist, '陶喆');
   assert.ok(calls.includes('similar'));
   assert.ok(calls.includes('intent'));
   assert.ok(calls.includes('cold:singer-mid:0.7'));
@@ -176,7 +180,7 @@ test('uses stable five-line copy when LLM is unavailable', async () => {
   assert.equal(result.steps, result.playlist);
 });
 
-test('falls back to mood search when intent returns Cyrillic junk', async () => {
+test('falls back to same-artist mood search when intent returns Cyrillic junk', async () => {
   const calls = [];
   const result = await assembleRadio({
     anchor: {
@@ -209,12 +213,51 @@ test('falls back to mood search when intent returns Cyrillic junk', async () => 
     }],
     search: async (query) => {
       calls.push(query);
-      return [track('mood-1', '千千阙歌', '陈慧娴')];
+      return [
+        track('mood-other', '千千阙歌', '陈慧娴'),
+        track('mood-1', '找自己', '陶喆'),
+      ];
     },
     coldTrack: async () => track('cold-1', '今天你要嫁给我'),
   });
 
-  assert.ok(calls.some((query) => String(query).includes('华语')));
-  assert.equal(result.playlist[4].title, '千千阙歌');
-  assert.equal(result.playlist[4].artist, '陈慧娴');
+  assert.ok(calls.some((query) => String(query).includes('陶喆') && String(query).includes('伤感')));
+  assert.equal(result.playlist[4].title, '找自己');
+  assert.equal(result.playlist[4].artist, '陶喆');
+});
+
+test('keeps step 5 on concert artist when intent returns another singer', async () => {
+  const result = await assembleRadio({
+    anchor: {
+      id: '1001',
+      songMid: 'anchor-mid',
+      title: '普通朋友',
+      artist: '陶喆',
+      source: 'qq-music',
+      recognitionSource: 'acrcloud',
+    },
+    artistCatalog: {
+      artist: '陶喆',
+      singerMid: 'singer-mid',
+      singerId: '4558',
+      topTracks: [
+        track('hot-1', '普通朋友'),
+        track('hot-2', '爱很简单'),
+        track('hot-3', '蝴蝶'),
+        track('hot-4', '沙滩'),
+      ],
+      source: 'qq-music',
+      ready: true,
+    },
+    emotionTags: ['温柔'],
+    concertInfo,
+  }, {}, {
+    similar: async () => [track('sim-1', '爱到无路可退', '彭佳慧')],
+    intent: async () => [track('intent-1', '我的歌声里', '曲婉婷')],
+    search: async () => [],
+    coldTrack: async () => track('cold-1', '今天你要嫁给我'),
+  });
+
+  assert.equal(result.playlist[4].artist, '陶喆');
+  assert.notEqual(result.playlist[4].title, '我的歌声里');
 });

@@ -79,7 +79,7 @@ const stages: Array<{ stage: RadioStage; chapter: string; label: string; default
     stage: 'backToReality',
     chapter: '回到现实',
     label: '陪你平稳落回日常',
-    defaultReason: '按当下情绪匹配一首送你回现实的歌，把余温慢慢收进日常。',
+    defaultReason: '在这位艺人的作品里，按当下情绪选一首送你回现实的歌。',
   },
 ]
 
@@ -217,13 +217,16 @@ function chooseFiveSteps(input: {
   // ④ colder same-artist track around the 70th popularity percentile.
   const step4 = take(coldPool, artistCatalog.slice().reverse(), artistPool)
     ?? take(input.similar.filter((track) => isSameArtist(track, input.artist)))
-  // ⑤ emotion intent may leave the concert artist.
-  const step5 = take(input.intent, artistPool, input.similar, input.local)
+  // ⑤ emotion intent stays on the concert artist (Singer + TrackType).
+  const intentSameArtist = unique(
+    input.intent.filter((track) => isSameArtist(track, input.artist))
+  )
+  const step5 = take(intentSameArtist, artistPool, artistLocal)
 
   const slots: Array<MusicTrack | null> = [step1, step2, step3, step4, step5]
   for (let index = 0; index < 5; index += 1) {
     if (slots[index]) continue
-    const preferSameArtist = index === 0 || index === 2 || index === 3
+    const preferSameArtist = index === 0 || index === 2 || index === 3 || index === 4
     slots[index] = preferSameArtist
       ? take(artistPool, artistLocal) ?? take(input.similar, input.intent)
       : take(input.intent, artistPool, input.similar, input.local)
@@ -384,19 +387,29 @@ export async function assembleRadio(
     ]).slice(0, 12)
   }
 
+  const emotionTag = tags[0] ?? '温柔'
+  const intentRequest = artist && !artist.includes('待确认')
+    ? { emotionTag, artist }
+    : emotionTag
   const [similarResult, intentResult] = await Promise.allSettled([
     reference ? deps.similar(reference, true, qqConfig) : Promise.resolve([]),
-    deps.intent(tags[0] ?? '温柔', qqConfig),
+    deps.intent(intentRequest, qqConfig),
   ])
   const similar = unique(similarResult.status === 'fulfilled' ? similarResult.value : [])
   let intent = unique(
-    (intentResult.status === 'fulfilled' ? intentResult.value : []).filter(isUsableIntentTrack)
+    (intentResult.status === 'fulfilled' ? intentResult.value : [])
+      .filter(isUsableIntentTrack)
+      .filter((track) => !artist || artist.includes('待确认') || isSameArtist(track, artist))
   )
-  // music_skill may return empty or junk for unknown TrackType; fall back to 华语 mood search.
-  if (intent.length === 0) {
-    const mood = mapEmotionTagToTrackType(tags[0] ?? '温柔')
-    const searched = await deps.search(`华语 ${mood}`, qqConfig).catch(() => [])
-    intent = unique(searched.filter(isUsableIntentTrack)).slice(0, 8)
+  // music_skill may return empty or junk; fall back to same-artist mood search.
+  if (intent.length === 0 && artist && !artist.includes('待确认')) {
+    const mood = mapEmotionTagToTrackType(emotionTag)
+    const searched = await deps.search(`${artist} ${mood}`, qqConfig).catch(() => [])
+    intent = unique(
+      searched
+        .filter(isUsableIntentTrack)
+        .filter((track) => isSameArtist(track, artist))
+    ).slice(0, 8)
   }
   const local = localTracks(artist)
 

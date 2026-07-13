@@ -6,7 +6,6 @@
   "packageManager": "pnpm@11.12.0",
   "scripts": {
     "dev": "next dev",
-    "setup:acrcloud": "py -3.8 -m pip install git+https://github.com/acrcloud/acrcloud_sdk_python",
     "test": "node --experimental-strip-types --test src/lib/*.test.mjs",
     "build": "next build",
     "typecheck": "tsc --noEmit",

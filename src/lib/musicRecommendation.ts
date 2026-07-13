@@ -311,6 +311,8 @@ export interface SimilarSongReference {
 
 export interface MusicIntentRequest {
   emotionTag: string
+  /** Concert artist — sent as Singer slot so mood matches stay on this singer. */
+  artist?: string
   requestId?: string
   limit?: number
   originalQuestion?: string
@@ -346,21 +348,16 @@ export function mapEmotionTagToTrackType(emotionTag: string) {
   return EMOTION_TO_TRACK_TYPE[tag] ?? DEFAULT_TRACK_TYPE
 }
 
-function hasCjk(text: string) {
-  return /[\u4e00-\u9fff]/.test(text)
-}
-
 function hasCyrillic(text: string) {
   return /[\u0400-\u04ff]/i.test(text)
 }
 
-/** Drop intent hits that look like wrong-locale / unplayable junk. */
+/** Drop intent hits that look like wrong-locale / garbled junk. */
 export function isUsableIntentTrack(track: Pick<MusicTrack, 'title' | 'artist' | 'playUrl' | 'tryUrl'>) {
   const title = track.title?.trim() ?? ''
   const artist = track.artist?.trim() ?? ''
   if (!title || !artist) return false
   if (hasCyrillic(title) || hasCyrillic(artist)) return false
-  if (!hasCjk(title) && !hasCjk(artist)) return false
   return true
 }
 
@@ -425,10 +422,23 @@ export async function searchQQMusicByIntent(
   if (!tag) return []
   if (!config.openId || !config.accessToken) return []
 
+  const artist = request.artist?.trim() ?? ''
+  const hasArtist = Boolean(artist) && !artist.includes('待确认')
   const trackType = mapEmotionTagToTrackType(tag)
   const limit = Math.max(1, Math.min(20, Math.floor(request.limit ?? 10)))
   const requestId = request.requestId ?? `lost-found-${Date.now()}`
-  const originalQuestion = request.originalQuestion ?? `推荐适合${tag}情绪的华语歌曲`
+  const originalQuestion = request.originalQuestion
+    ?? (hasArtist
+      ? `推荐${artist}适合${tag}情绪的歌曲`
+      : `推荐适合${tag}情绪的华语歌曲`)
+  const slots = [
+    ...(hasArtist ? [{ name: 'Singer', value: artist, intent_type: 0 }] : []),
+    {
+      name: 'TrackType',
+      value: trackType,
+      intent_type: 0,
+    },
+  ]
   const params = buildQQMusicBaseParams('music_skill', config)
   params.set('opi_protocol_version', '1')
   params.set('cms_type', '0')
@@ -446,15 +456,18 @@ export async function searchQQMusicByIntent(
     music_skill_mode: '1',
     intent: {
       name: 'SearchSong',
-      slots: [{
-        name: 'TrackType',
-        value: trackType,
-        intent_type: 0,
-      }],
+      slots,
     },
   }))
   const tracks = await fetchQQMusicTracks(params, trackType, 'music skill', config)
-  return preferPlayableIntentTracks(tracks.filter(isUsableIntentTrack))
+  const usable = preferPlayableIntentTracks(tracks.filter(isUsableIntentTrack))
+  if (!hasArtist) return usable
+  const sameArtist = usable.filter((track) => {
+    const normalizedArtist = artist.toLowerCase().replace(/\s+/g, '')
+    const trackArtist = track.artist.toLowerCase().replace(/\s+/g, '')
+    return trackArtist.includes(normalizedArtist) || normalizedArtist.includes(trackArtist)
+  })
+  return sameArtist.length > 0 ? sameArtist : []
 }
 
 function describeQQMusicPayloadError(payload: unknown, operation: string) {

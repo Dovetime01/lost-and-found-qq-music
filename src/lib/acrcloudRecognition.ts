@@ -1,9 +1,7 @@
-import { spawn } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { createHmac } from 'node:crypto'
 
 const MAX_SAMPLE_BYTES = 5 * 1024 * 1024
+const IDENTIFY_PATH = '/v1/identify'
 
 export type AcrCloudRecognitionType = 'music' | 'humming'
 
@@ -12,10 +10,11 @@ export interface AcrCloudConfig {
   accessKey?: string
   accessSecret?: string
   protocol?: 'http' | 'https'
-  pythonPath?: string
   timeoutMs?: number
   /** Test override: return a full ACRCloud payload (music preferred over humming). */
   sdkRunner?: (wav: Buffer) => Promise<unknown>
+  /** Test override for the Identify HTTP call. */
+  fetchImpl?: typeof fetch
 }
 
 export interface AcrCloudSongCandidate {
@@ -40,6 +39,10 @@ function text(value: unknown) {
 function number(value: unknown) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function normalizeHost(host: string) {
+  return host.replace(/^https?:\/\//i, '').replace(/\/+$/, '')
 }
 
 function parseCandidates(
@@ -82,79 +85,69 @@ function statusOf(payload: unknown) {
   return (payload as { status?: { code?: unknown; msg?: unknown } }).status
 }
 
-async function runPythonSdk(
-  wav: Buffer,
-  config: AcrCloudConfig,
-  scriptPath: string,
-  label: string
+function buildSignature(
+  accessKey: string,
+  accessSecret: string,
+  dataType: string,
+  timestamp: string
 ) {
-  const directory = await mkdtemp(join(tmpdir(), `lost-found-acr-${label}-`))
-  const wavPath = join(directory, 'sample.wav')
-  await writeFile(wavPath, wav)
+  const stringToSign = ['POST', IDENTIFY_PATH, accessKey, dataType, '1', timestamp].join('\n')
+  return createHmac('sha1', accessSecret)
+    .update(Buffer.from(stringToSign, 'utf-8'))
+    .digest('base64')
+}
 
+async function identifyAudioHttp(wav: Buffer, config: AcrCloudConfig): Promise<unknown> {
+  const host = normalizeHost(text(config.host))
+  const accessKey = text(config.accessKey)
+  const accessSecret = text(config.accessSecret)
+  const protocol = config.protocol ?? 'https'
+  const dataType = 'audio'
+  const timestamp = String(Date.now() / 1000)
+  const signature = buildSignature(accessKey, accessSecret, dataType, timestamp)
+  const fetchImpl = config.fetchImpl ?? fetch
+
+  const form = new FormData()
+  form.append('sample', new Blob([new Uint8Array(wav)], { type: 'audio/wav' }), 'sample.wav')
+  form.append('sample_bytes', String(wav.length))
+  form.append('access_key', accessKey)
+  form.append('data_type', dataType)
+  form.append('signature_version', '1')
+  form.append('signature', signature)
+  form.append('timestamp', timestamp)
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), config.timeoutMs ?? 25_000)
   try {
-    return await new Promise<unknown>((resolve, reject) => {
-      const child = spawn(config.pythonPath ?? process.env.ACRCLOUD_PYTHON_PATH ?? 'python', [
-        scriptPath,
-        wavPath,
-      ], {
-        windowsHide: true,
-        env: {
-          ...process.env,
-          ACRCLOUD_HOST: text(config.host),
-          ACRCLOUD_ACCESS_KEY: text(config.accessKey),
-          ACRCLOUD_ACCESS_SECRET: text(config.accessSecret),
-          ACRCLOUD_PROTOCOL: config.protocol ?? 'https',
-          PYTHONIOENCODING: 'utf-8',
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-
-      let stdout = ''
-      let stderr = ''
-      let settled = false
-      const timeout = setTimeout(() => {
-        if (settled) return
-        settled = true
-        child.kill()
-        reject(new Error(`ACRCloud ${label} SDK timed out`))
-      }, config.timeoutMs ?? 25_000)
-
-      child.stdout.on('data', (chunk: Buffer) => {
-        if (stdout.length < 1_000_000) stdout += chunk.toString()
-      })
-      child.stderr.on('data', (chunk: Buffer) => {
-        if (stderr.length < 8_000) stderr += chunk.toString()
-      })
-      child.once('error', (error) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timeout)
-        reject(new Error(`Unable to start ACRCloud ${label} SDK: ${error.message}`))
-      })
-      child.once('close', (code) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timeout)
-        try {
-          const payload = JSON.parse(stdout.trim()) as unknown
-          if (code === 0) resolve(payload)
-          else reject(new Error(
-            text(statusOf(payload)?.msg)
-              || stderr.trim()
-              || `ACRCloud ${label} SDK exited with code ${String(code)}`
-          ))
-        } catch {
-          reject(new Error(
-            stderr.trim()
-              || stdout.trim().slice(0, 300)
-              || `ACRCloud ${label} SDK exited with code ${String(code)}`
-          ))
-        }
-      })
+    const response = await fetchImpl(`${protocol}://${host}${IDENTIFY_PATH}`, {
+      method: 'POST',
+      body: form,
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
     })
+    const body = await response.text()
+    let payload: unknown
+    try {
+      payload = JSON.parse(body) as unknown
+    } catch {
+      throw new Error(
+        response.ok
+          ? 'ACRCloud returned a non-JSON response'
+          : `ACRCloud HTTP ${response.status}: ${body.slice(0, 180)}`
+      )
+    }
+    if (!response.ok) {
+      const message = text(statusOf(payload)?.msg) || body.slice(0, 180)
+      throw new Error(`ACRCloud HTTP ${response.status}${message ? `: ${message}` : ''}`)
+    }
+    return payload
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('ACRCloud music SDK timed out')
+    }
+    throw error
   } finally {
-    await rm(directory, { recursive: true, force: true }).catch(() => undefined)
+    clearTimeout(timeout)
   }
 }
 
@@ -187,21 +180,12 @@ function interpretPayload(
   }
 }
 
-async function recognizeMode(
-  wav: Buffer,
-  config: AcrCloudConfig,
-  mode: AcrCloudRecognitionType
-): Promise<AcrCloudRecognitionResult> {
-  const scriptPath = mode === 'music'
-    ? (process.env.ACRCLOUD_MUSIC_SCRIPT_PATH ?? join('scripts', 'acrcloud_music.py'))
-    : (process.env.ACRCLOUD_HUMMING_SCRIPT_PATH ?? join('scripts', 'acrcloud_humming.py'))
-  const payload = await runPythonSdk(wav, config, scriptPath, mode)
-  return interpretPayload(payload, mode)
-}
-
 /**
- * Prefer AVR music identification (works when the clip contains the original track).
- * Fall back to humming when music returns no result (user humming / singing along).
+ * Identify a WAV clip through ACRCloud's HTTP Identify API (data_type=audio).
+ * Works on Vercel / serverless — no local Python SDK required.
+ *
+ * Prefer AVR music matches; if the same response includes humming metadata and
+ * music is empty, surface those humming candidates.
  */
 export async function recognizeAcrCloudWav(
   wav: Buffer,
@@ -218,22 +202,5 @@ export async function recognizeAcrCloudWav(
     return interpretPayload(await config.sdkRunner(wav), 'music')
   }
 
-  const music = await recognizeMode(wav, config, 'music')
-  if (music.candidates.length) return music
-
-  try {
-    const humming = await recognizeMode(wav, config, 'humming')
-    if (humming.candidates.length) return humming
-    return {
-      candidates: [],
-      message: humming.message || music.message || 'No match',
-      mode: 'humming',
-    }
-  } catch (error) {
-    // Music already returned empty; surface humming failure only if music had no soft message.
-    if (music.message) {
-      return { candidates: [], message: music.message, mode: 'music' }
-    }
-    throw error
-  }
+  return interpretPayload(await identifyAudioHttp(wav, config), 'music')
 }
