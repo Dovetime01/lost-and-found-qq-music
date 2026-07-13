@@ -65,6 +65,14 @@ function isTrustedCandidate(candidate: AcrCloudSongCandidate, expectedArtist = '
   return confidence >= 60
 }
 
+/** Sole ACRCloud hit: accept lower scores so a single clear match can still map. */
+function isSoleCandidateAccepted(candidates: AcrCloudSongCandidate[]) {
+  if (candidates.length !== 1) return false
+  const sole = candidates[0]
+  if (!sole?.title || !sole.artist) return false
+  return (sole.confidence ?? 0) >= 25
+}
+
 function sanitizeDetail(message: string) {
   return message
     .replace(/[A-Za-z]:\\[^\s]+/g, '[path]')
@@ -163,9 +171,21 @@ export async function POST(request: Request) {
         return ((right.confidence ?? 0) + artistBoost(right) + typeBoost(right))
           - ((left.confidence ?? 0) + artistBoost(left) + typeBoost(left))
       })
-    const trustedCandidates = candidates.filter((candidate) =>
-      isTrustedCandidate(candidate, expectedArtist)
-    )
+    const trustedCandidates = (() => {
+      const trusted = candidates.filter((candidate) =>
+        isTrustedCandidate(candidate, expectedArtist)
+      )
+      if (trusted.length) return trusted
+      if (isSoleCandidateAccepted(candidates)) {
+        console.info('[ACRCloud] accepting sole candidate above confidence 25', {
+          title: candidates[0]?.title,
+          artist: candidates[0]?.artist,
+          confidence: candidates[0]?.confidence ?? null,
+        })
+        return candidates
+      }
+      return trusted
+    })()
     console.info('[ACRCloud] recognition result', {
       clipCount: clips.length,
       modes: windowResults.map((result) => result.mode ?? null),

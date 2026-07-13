@@ -146,6 +146,7 @@ test('uses artist hot track as substitute anchor when recognition is missing', a
         track('hot-1', '爱很简单'),
         track('hot-2', '蝴蝶'),
         track('hot-3', '普通朋友'),
+        track('hot-4', '沙滩'),
       ],
       source: 'qq-music',
       ready: true,

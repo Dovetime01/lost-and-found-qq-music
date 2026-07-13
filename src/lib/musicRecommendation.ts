@@ -370,6 +370,53 @@ function requireQQMusicConfig(config: QQMusicConfig) {
   if (!hasQQMusicConfig(config)) throw new Error('QQ Music configuration is incomplete')
 }
 
+function qqMusicCmd(params: URLSearchParams) {
+  return params.get('opi_cmd') || 'unknown'
+}
+
+function qqMusicPayloadRet(payload: unknown) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+  const ret = (payload as { ret?: unknown }).ret
+  return ret === undefined ? null : ret
+}
+
+function logQQMusicRequest(
+  operation: string,
+  params: URLSearchParams,
+  detail: Record<string, unknown> = {}
+) {
+  console.info('[QQ音乐] request', {
+    operation,
+    opi_cmd: qqMusicCmd(params),
+    w: params.get('w') || undefined,
+    song_id: params.get('song_id') || undefined,
+    song_mid: params.get('song_mid') || undefined,
+    singer_name: params.get('singer_name') || undefined,
+    singer_id: params.get('singer_id') || undefined,
+    singer_mid: params.get('singer_mid') || undefined,
+    has_rec: params.get('has_rec') || undefined,
+    page_index: params.get('page_index') || undefined,
+    order: params.get('order') || undefined,
+    hasOpenId: Boolean(params.get('qqmusic_open_id')),
+    hasAccessToken: Boolean(params.get('qqmusic_access_token')),
+    ...detail,
+  })
+}
+
+function logQQMusicResponse(
+  operation: string,
+  params: URLSearchParams,
+  startedAt: number,
+  detail: Record<string, unknown>
+) {
+  console.info('[QQ音乐] response', {
+    operation,
+    opi_cmd: qqMusicCmd(params),
+    elapsedMs: Date.now() - startedAt,
+    ...detail,
+  })
+}
+
 async function fetchQQMusicTracks(
   params: URLSearchParams,
   query: string,
@@ -378,19 +425,44 @@ async function fetchQQMusicTracks(
 ) {
   requireQQMusicConfig(config)
   const request = buildSignedQQMusicRequest(params, config)
-  const response = await (config.fetcher ?? fetch)(request.url, {
-    method: 'GET',
-    headers: {
-      'X-QYOPI-Sign': request.sign,
-      Accept: 'application/json',
-    },
-  })
-  if (!response.ok) throw new Error(`QQ Music ${operation} failed with status ${response.status}`)
-  const payload = await response.json()
-  describeQQMusicPayloadError(payload, operation)
-  return extractRawTracks(payload)
-    .map((track, index) => normalizeTrack(track, index, query))
-    .filter((track): track is MusicTrack => Boolean(track))
+  const startedAt = Date.now()
+  logQQMusicRequest(operation, params, { query })
+  try {
+    const response = await (config.fetcher ?? fetch)(request.url, {
+      method: 'GET',
+      headers: {
+        'X-QYOPI-Sign': request.sign,
+        Accept: 'application/json',
+      },
+    })
+    if (!response.ok) {
+      logQQMusicResponse(operation, params, startedAt, {
+        ok: false,
+        httpStatus: response.status,
+      })
+      throw new Error(`QQ Music ${operation} failed with status ${response.status}`)
+    }
+    const payload = await response.json()
+    describeQQMusicPayloadError(payload, operation)
+    const tracks = extractRawTracks(payload)
+      .map((track, index) => normalizeTrack(track, index, query))
+      .filter((track): track is MusicTrack => Boolean(track))
+    logQQMusicResponse(operation, params, startedAt, {
+      ok: true,
+      httpStatus: response.status,
+      ret: qqMusicPayloadRet(payload),
+      trackCount: tracks.length,
+      sample: tracks.slice(0, 5).map((track) => `${track.title}-${track.artist}`),
+      playableCount: tracks.filter((track) => Boolean(track.playUrl || track.tryUrl)).length,
+    })
+    return tracks
+  } catch (error) {
+    logQQMusicResponse(operation, params, startedAt, {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
 }
 
 export async function getSimilarQQMusicSongs(
@@ -506,25 +578,51 @@ export async function queryQQMusicSinger(
   params.set('num', '10')
   const request = buildSignedQQMusicRequest(params, config)
   const fetcher = config.fetcher ?? fetch
-  const response = await fetcher(request.url, {
-    method: 'GET',
-    headers: { 'X-QYOPI-Sign': request.sign, Accept: 'application/json' },
-  })
-  if (!response.ok) throw new Error(`QQ Music singer lookup failed with status ${response.status}`)
-
-  const payload = await response.json()
-  describeQQMusicPayloadError(payload, 'singer lookup')
-  const singers = extractRawSingers(payload)
-    .map((raw) => {
-      const id = asString(raw.singer_id ?? raw.id) || undefined
-      const mid = asString(raw.singer_mid ?? raw.mid)
-      const name = asString(raw.singer_name ?? raw.name)
-      return id ? { id, mid, name } : { mid, name }
+  const startedAt = Date.now()
+  logQQMusicRequest('singer lookup', params)
+  try {
+    const response = await fetcher(request.url, {
+      method: 'GET',
+      headers: { 'X-QYOPI-Sign': request.sign, Accept: 'application/json' },
     })
-    .filter((singer) => singer.mid && singer.name)
-  return singers.find((singer) => normalizeMatchText(singer.name) === normalizeMatchText(normalizedArtist))
-    ?? singers[0]
-    ?? null
+    if (!response.ok) {
+      logQQMusicResponse('singer lookup', params, startedAt, {
+        ok: false,
+        httpStatus: response.status,
+      })
+      throw new Error(`QQ Music singer lookup failed with status ${response.status}`)
+    }
+
+    const payload = await response.json()
+    describeQQMusicPayloadError(payload, 'singer lookup')
+    const singers = extractRawSingers(payload)
+      .map((raw) => {
+        const id = asString(raw.singer_id ?? raw.id) || undefined
+        const mid = asString(raw.singer_mid ?? raw.mid)
+        const name = asString(raw.singer_name ?? raw.name)
+        return id ? { id, mid, name } : { mid, name }
+      })
+      .filter((singer) => singer.mid && singer.name)
+    const matched = singers.find((singer) => normalizeMatchText(singer.name) === normalizeMatchText(normalizedArtist))
+      ?? singers[0]
+      ?? null
+    logQQMusicResponse('singer lookup', params, startedAt, {
+      ok: true,
+      httpStatus: response.status,
+      ret: qqMusicPayloadRet(payload),
+      singerCount: singers.length,
+      matched: matched
+        ? { id: matched.id ?? null, mid: matched.mid, name: matched.name }
+        : null,
+    })
+    return matched
+  } catch (error) {
+    logQQMusicResponse('singer lookup', params, startedAt, {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
 }
 
 export interface SingerSongsQuery {
@@ -571,36 +669,63 @@ export async function getQQMusicSingerSongs(
   params.set('order', String(order))
 
   const request = buildSignedQQMusicRequest(params, config)
-  const response = await (config.fetcher ?? fetch)(request.url, {
-    method: 'GET',
-    headers: {
-      'X-QYOPI-Sign': request.sign,
-      Accept: 'application/json',
-    },
-  })
-  if (!response.ok) throw new Error(`QQ Music singer songs failed with status ${response.status}`)
-  const payload = await response.json()
-  describeQQMusicPayloadError(payload, 'singer songs')
+  const startedAt = Date.now()
+  logQQMusicRequest('singer songs', params)
+  try {
+    const response = await (config.fetcher ?? fetch)(request.url, {
+      method: 'GET',
+      headers: {
+        'X-QYOPI-Sign': request.sign,
+        Accept: 'application/json',
+      },
+    })
+    if (!response.ok) {
+      logQQMusicResponse('singer songs', params, startedAt, {
+        ok: false,
+        httpStatus: response.status,
+      })
+      throw new Error(`QQ Music singer songs failed with status ${response.status}`)
+    }
+    const payload = await response.json()
+    describeQQMusicPayloadError(payload, 'singer songs')
 
-  const root = payload && typeof payload === 'object' && !Array.isArray(payload)
-    ? payload as Record<string, unknown>
-    : {}
-  const songSum = Number(root.song_sum)
-  const hasMore = Number(root.has_more) === 1
-  const singerName = asString(root.singer_name)
-  const label = singerName || '歌手歌曲'
-  const tracks = extractRawTracks(payload)
-    .map((track, index) => normalizeTrack(track, index, label))
-    .filter((track): track is MusicTrack => Boolean(track))
+    const root = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : {}
+    const songSum = Number(root.song_sum)
+    const hasMore = Number(root.has_more) === 1
+    const singerName = asString(root.singer_name)
+    const label = singerName || '歌手歌曲'
+    const tracks = extractRawTracks(payload)
+      .map((track, index) => normalizeTrack(track, index, label))
+      .filter((track): track is MusicTrack => Boolean(track))
 
-  return {
-    tracks,
-    songSum: Number.isFinite(songSum) && songSum > 0 ? songSum : tracks.length,
-    pageIndex,
-    hasMore,
-    singerId: asString(root.singer_id) || undefined,
-    singerMid: asString(root.singer_mid) || undefined,
-    singerName: singerName || undefined,
+    logQQMusicResponse('singer songs', params, startedAt, {
+      ok: true,
+      httpStatus: response.status,
+      ret: qqMusicPayloadRet(payload),
+      trackCount: tracks.length,
+      songSum: Number.isFinite(songSum) ? songSum : null,
+      hasMore,
+      singerName: singerName || null,
+      sample: tracks.slice(0, 5).map((track) => `${track.title}-${track.artist}`),
+    })
+
+    return {
+      tracks,
+      songSum: Number.isFinite(songSum) && songSum > 0 ? songSum : tracks.length,
+      pageIndex,
+      hasMore,
+      singerId: asString(root.singer_id) || undefined,
+      singerMid: asString(root.singer_mid) || undefined,
+      singerName: singerName || undefined,
+    }
+  } catch (error) {
+    logQQMusicResponse('singer songs', params, startedAt, {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
   }
 }
 

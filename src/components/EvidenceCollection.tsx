@@ -650,7 +650,7 @@ export default function EvidenceCollection({ onNext }: EvidenceCollectionProps) 
                     {isPreparing ? '正在读取文件…' : editingValue ? '更换文件' : '选择文件'}
                   </button>
                   {editingValue && <button type="button" onClick={() => { remove(editing); closeModal() }} className="w-full py-2 text-sm text-red-900/70">删除</button>}
-                  <p className="text-xs text-[#3B2A22]/55">{editing === 'video' ? '视频需小于 4.5MB；将在浏览器本地截取50%处画面并记录时长。' : '支持 JPG、PNG、WebP。'}</p>
+                  {editing === 'photo' && <p className="text-xs text-[#3B2A22]/55">支持 JPG、PNG、WebP。</p>}
                 </div>
               )}
 

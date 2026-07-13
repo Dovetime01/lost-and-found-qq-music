@@ -313,6 +313,23 @@ export function useMemoryPipeline() {
 
       const [claim, radio] = await Promise.all([claimPromise, radioPromise])
       if (!active()) return
+      console.groupCollapsed(
+        `%c[归途电台] ${radio.status?.fallbackUsed ? '曲目含兜底' : '曲目QQ组装'}${
+          radio.status?.provider?.includes('local-copy') ? ' · 文案模板' : ''
+        }`,
+        `color: ${radio.status?.fallbackUsed ? '#C46B6B' : '#C9A46A'}; font-weight: 600;`
+      )
+      console.log('status:', radio.status)
+      if (radio.status?.message) console.log('message:', radio.status.message)
+      console.log('intro:', radio.introCopy ?? radio.intro)
+      console.table((radio.steps ?? radio.playlist ?? []).map((step, index) => ({
+        step: index + 1,
+        stage: step.stage,
+        title: step.title,
+        artist: step.artist,
+        source: step.source ?? '',
+      })))
+      console.groupEnd()
       update((current) => ({ ...current, claim, radio, readiness: 'all-ready' }))
     })()
   }, [])

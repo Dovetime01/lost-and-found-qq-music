@@ -35,8 +35,20 @@ export async function POST(request: Request) {
         ?? process.env.LLM_MODEL
         ?? process.env.AI_MODEL,
     })
+    console.info('[generate-radio] done', {
+      fallbackUsed: result.status?.fallbackUsed ?? null,
+      source: result.status?.source ?? null,
+      message: result.status?.message ?? null,
+      steps: (result.steps ?? result.playlist ?? []).map((step) => ({
+        stage: step.stage,
+        title: step.title,
+        artist: step.artist,
+        source: step.source,
+      })),
+    })
     return NextResponse.json(result)
-  } catch {
+  } catch (error) {
+    console.error('[generate-radio] failed', error)
     return NextResponse.json({ error: 'Invalid radio request.' }, { status: 400 })
   }
 }

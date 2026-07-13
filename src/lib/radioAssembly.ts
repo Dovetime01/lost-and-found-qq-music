@@ -127,7 +127,14 @@ function localTracks(artist: string): MusicTrack[] {
     tags: [],
     reason: '',
   }, artist))
-  return [...preferred, ...songs].map((song) => ({
+  // Never spill the Mayday/demo catalog into another artist's radio.
+  const knownArtist = Boolean(artist) && !artist.includes('待确认')
+  const pool = preferred.length > 0
+    ? preferred
+    : knownArtist
+      ? []
+      : songs
+  return pool.map((song) => ({
     id: `local-${song.id}`,
     title: song.title,
     artist: song.artist,
@@ -193,17 +200,20 @@ function chooseFiveSteps(input: {
     return null
   }
 
+  const knownArtist = Boolean(input.artist) && !input.artist.includes('待确认')
   const artistCatalog = unique(input.catalog.filter((track) => isSameArtist(track, input.artist)))
   const artistLocal = unique(input.local.filter((track) => isSameArtist(track, input.artist)))
   const artistPool = unique([...artistCatalog, ...artistLocal])
   const coldPool = unique(
     input.cold.filter((track) => isSameArtist(track, input.artist))
   )
+  // Cross-artist filler only when concert artist is unknown.
+  const looseLocal = knownArtist ? [] : input.local
 
   let substituteAnchor = false
   let step1 = input.anchor
   if (!step1) {
-    step1 = take(artistCatalog, artistPool, input.local)
+    step1 = take(artistCatalog, artistPool, looseLocal)
     substituteAnchor = Boolean(step1)
   } else {
     used.add(key(step1))
@@ -227,14 +237,19 @@ function chooseFiveSteps(input: {
   for (let index = 0; index < 5; index += 1) {
     if (slots[index]) continue
     const preferSameArtist = index === 0 || index === 2 || index === 3 || index === 4
-    slots[index] = preferSameArtist
-      ? take(artistPool, artistLocal) ?? take(input.similar, input.intent)
-      : take(input.intent, artistPool, input.similar, input.local)
+    if (knownArtist || preferSameArtist) {
+      slots[index] = take(artistPool, artistLocal, intentSameArtist)
+        ?? take(input.similar.filter((track) => isSameArtist(track, input.artist)))
+    } else {
+      slots[index] = take(input.intent, artistPool, input.similar, looseLocal)
+    }
   }
 
   const selected = slots.filter((track): track is MusicTrack => Boolean(track))
   while (selected.length < 5) {
-    const filler = take(artistPool, artistLocal, input.intent, input.similar, input.local)
+    const filler = knownArtist
+      ? take(artistPool, artistLocal, intentSameArtist)
+      : take(artistPool, artistLocal, input.intent, input.similar, looseLocal)
     if (!filler) break
     selected.push(filler)
   }
@@ -375,16 +390,50 @@ export async function assembleRadio(
   const identified = anchorTrack(input.anchor)
   const reference = similarReference(input.anchor)
 
+  console.info('[归途电台] assemble start', {
+    artist: artist || null,
+    anchor: identified
+      ? { title: identified.title, artist: identified.artist, songMid: identified.songMid ?? null, id: identified.id }
+      : null,
+    similarReference: reference,
+    catalogPrefetch: {
+      source: input.artistCatalog?.source ?? null,
+      trackCount: input.artistCatalog?.topTracks?.length ?? 0,
+      singerMid: input.artistCatalog?.singerMid ?? null,
+      singerId: input.artistCatalog?.singerId ?? null,
+    },
+    multimodal: {
+      fallbackUsed: input.multimodal?.status?.fallbackUsed ?? null,
+      source: input.multimodal?.status?.source ?? null,
+      provider: input.multimodal?.status?.provider ?? null,
+      emotionTags: tags,
+      message: input.multimodal?.status?.message ?? null,
+    },
+  })
+
   let catalog = unique(
     (input.artistCatalog?.topTracks ?? []).filter((track) => isSameArtist(track, artist))
   )
   // If prefetch returned mixed/empty results, refresh artist hot tracks via search once.
   if (catalog.length < 3 && artist && !artist.includes('待确认')) {
-    const searchedArtist = await deps.search(artist, qqConfig).catch(() => [])
-    catalog = unique([
-      ...catalog,
-      ...searchedArtist.filter((track) => isSameArtist(track, artist)),
-    ]).slice(0, 12)
+    try {
+      const searchedArtist = await deps.search(artist, qqConfig)
+      catalog = unique([
+        ...catalog,
+        ...searchedArtist.filter((track) => isSameArtist(track, artist)),
+      ]).slice(0, 12)
+      console.info('[归途电台] ③ artist search refresh', {
+        query: artist,
+        returned: searchedArtist.length,
+        sameArtist: catalog.length,
+        titles: catalog.slice(0, 5).map((track) => track.title),
+      })
+    } catch (error) {
+      console.warn('[归途电台] ③ artist search failed', {
+        artist,
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
   const emotionTag = tags[0] ?? '温柔'
@@ -395,41 +444,94 @@ export async function assembleRadio(
     reference ? deps.similar(reference, true, qqConfig) : Promise.resolve([]),
     deps.intent(intentRequest, qqConfig),
   ])
+  if (similarResult.status === 'rejected') {
+    console.warn('[归途电台] ② similar song API failed', {
+      reference,
+      message: similarResult.reason instanceof Error
+        ? similarResult.reason.message
+        : String(similarResult.reason),
+    })
+  }
+  if (intentResult.status === 'rejected') {
+    console.warn('[归途电台] ⑤ music_skill failed', {
+      intentRequest,
+      message: intentResult.reason instanceof Error
+        ? intentResult.reason.message
+        : String(intentResult.reason),
+    })
+  }
   const similar = unique(similarResult.status === 'fulfilled' ? similarResult.value : [])
   let intent = unique(
     (intentResult.status === 'fulfilled' ? intentResult.value : [])
       .filter(isUsableIntentTrack)
       .filter((track) => !artist || artist.includes('待确认') || isSameArtist(track, artist))
   )
+  console.info('[归途电台] ②⑤ API results', {
+    similarCount: similar.length,
+    similarTitles: similar.slice(0, 5).map((track) => `${track.title}-${track.artist}`),
+    intentCount: intent.length,
+    intentTitles: intent.slice(0, 5).map((track) => `${track.title}-${track.artist}`),
+    skippedSimilar: !reference,
+  })
   // music_skill may return empty or junk; fall back to same-artist mood search.
   if (intent.length === 0 && artist && !artist.includes('待确认')) {
     const mood = mapEmotionTagToTrackType(emotionTag)
-    const searched = await deps.search(`${artist} ${mood}`, qqConfig).catch(() => [])
-    intent = unique(
-      searched
-        .filter(isUsableIntentTrack)
-        .filter((track) => isSameArtist(track, artist))
-    ).slice(0, 8)
+    try {
+      const searched = await deps.search(`${artist} ${mood}`, qqConfig)
+      intent = unique(
+        searched
+          .filter(isUsableIntentTrack)
+          .filter((track) => isSameArtist(track, artist))
+      ).slice(0, 8)
+      console.info('[归途电台] ⑤ mood search fallback', {
+        query: `${artist} ${mood}`,
+        returned: searched.length,
+        usableSameArtist: intent.length,
+      })
+    } catch (error) {
+      console.warn('[归途电台] ⑤ mood search failed', {
+        artist,
+        mood,
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
   const local = localTracks(artist)
 
   const provisionalUsed = unique([identified, ...catalog.slice(0, 2), ...similar.slice(0, 1)])
   const singerMid = input.artistCatalog?.singerMid ?? undefined
   const singerId = input.artistCatalog?.singerId ?? undefined
-  const coldTrack = (singerMid || singerId)
-    ? await deps.coldTrack(
-      { id: singerId ?? undefined, mid: singerMid },
-      {
-        percentile: 0.7,
-        exclude: provisionalUsed.filter(Boolean) as MusicTrack[],
-        config: qqConfig,
-      }
-    ).catch(() => null)
-    : null
+  let coldTrack: MusicTrack | null = null
+  if (singerMid || singerId) {
+    try {
+      coldTrack = await deps.coldTrack(
+        { id: singerId ?? undefined, mid: singerMid },
+        {
+          percentile: 0.7,
+          exclude: provisionalUsed.filter(Boolean) as MusicTrack[],
+          config: qqConfig,
+        }
+      )
+      console.info('[归途电台] ④ cold track', {
+        singerMid: singerMid ?? null,
+        singerId: singerId ?? null,
+        title: coldTrack?.title ?? null,
+        artist: coldTrack?.artist ?? null,
+      })
+    } catch (error) {
+      console.warn('[归途电台] ④ cold track failed', {
+        singerMid: singerMid ?? null,
+        singerId: singerId ?? null,
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  } else {
+    console.warn('[归途电台] ④ skipped — missing singerMid/singerId from artist prefetch')
+  }
   const cold = coldTrack ? [withReason(coldTrack, stages[3].defaultReason)] : []
 
   // Spec backup: when recognition fails, ① uses the hottest cached artist track.
-  const tracks = chooseFiveSteps({
+  let tracks = chooseFiveSteps({
     artist,
     anchor: identified,
     similar,
@@ -438,6 +540,20 @@ export async function assembleRadio(
     intent,
     local,
   })
+  // Absolute last resort only: never invent Mayday mid-list for another artist,
+  // but keep demo continuity when every QQ pool is empty.
+  if (tracks.length === 0) {
+    console.warn('[归途电台] artist pools empty — demo local catalog last resort')
+    tracks = chooseFiveSteps({
+      artist: '',
+      anchor: identified,
+      similar,
+      catalog,
+      cold,
+      intent,
+      local: localTracks(''),
+    })
+  }
   const playlist = tracks.slice(0, 5).map(toStep)
   const copy = await generateCopy(playlist, tags, input.concertInfo, config)
   const usedLocal = playlist.some((step) => step.source === 'local-fallback')
@@ -445,8 +561,36 @@ export async function assembleRadio(
     || similar.length > 0
     || intent.length > 0
     || catalog.length > 0
-  const fallbackUsed = usedLocal || copy.fallbackUsed || !externalSucceeded
+  // Song-level fallback only. Copy LLM template fallback is reported separately in message.
+  const fallbackUsed = usedLocal || !externalSucceeded
   const recommendLines = copy.recommendLines.slice(0, playlist.length)
+  const statusMessage = [
+    usedLocal ? '部分曲目使用本地曲库补足五段结构。' : '',
+    !externalSucceeded ? 'QQ 音乐接口未返回可用曲目，已降级。' : '',
+    !usedLocal && externalSucceeded && catalog.length === 0 && similar.length === 0
+      ? '艺人热门/相似歌接口为空，已尽量用识别锚点与意图结果组装。'
+      : '',
+    copy.fallbackUsed ? '电台文案使用本地模板（豆包文案未成功）。' : '',
+  ].filter(Boolean).join(' ') || undefined
+
+  console.info('[归途电台] assemble done', {
+    fallbackUsed,
+    copyFallbackUsed: copy.fallbackUsed,
+    usedLocal,
+    poolSizes: {
+      catalog: catalog.length,
+      similar: similar.length,
+      cold: cold.length,
+      intent: intent.length,
+      local: local.length,
+    },
+    steps: playlist.map((step) => ({
+      stage: step.stage,
+      title: step.title,
+      artist: step.artist,
+      source: step.source,
+    })),
+  })
 
   return {
     playlist,
@@ -454,9 +598,11 @@ export async function assembleRadio(
     recommendLines,
     status: {
       source: externalSucceeded ? 'qq-music' : 'fallback',
-      provider: externalSucceeded ? 'QQ Music + Doubao' : 'local-catalog',
+      provider: externalSucceeded
+        ? (copy.fallbackUsed ? 'QQ Music + local-copy' : 'QQ Music + Doubao')
+        : 'local-catalog',
       fallbackUsed,
-      message: usedLocal ? '部分曲目使用本地曲库补足五段结构。' : undefined,
+      message: statusMessage,
     },
     intro: copy.introCopy,
     recommendLine: recommendLines.join('；'),
