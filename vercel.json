@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "src/app/api/identify-song/route.ts": {
+      "memory": 3009,
+      "maxDuration": 60
+    },
+    "src/app/api/analyze-multimodal/route.ts": {
+      "memory": 3009,
+      "maxDuration": 60
+    }
+  }
+}

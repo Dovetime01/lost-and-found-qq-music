@@ -7,6 +7,9 @@ import type { SongAnchor } from '@/lib/pipelineTypes'
 import { qqMusicConfigForRequest } from '@/lib/qqMusicRouteConfig'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
+// Closer to ACRCloud China North; reduces cold outbound flakiness from US regions.
+export const preferredRegion = ['hkg1', 'sin1']
 
 function normalized(value: string) {
   return value.toLocaleLowerCase().replace(/[\s·・._\-—/\\]+/g, '')
@@ -62,8 +65,24 @@ function isTrustedCandidate(candidate: AcrCloudSongCandidate, expectedArtist = '
   return confidence >= 60
 }
 
+function sanitizeDetail(message: string) {
+  return message
+    .replace(/[A-Za-z]:\\[^\s]+/g, '[path]')
+    .replace(/\/(?:var|tmp|Users|home)\/[^\s]+/g, '[path]')
+    .slice(0, 180)
+}
+
+function envProtocol(): 'http' | 'https' | undefined {
+  const value = process.env.ACRCLOUD_PROTOCOL?.trim().toLowerCase()
+  if (value === 'http' || value === 'https') return value
+  return undefined
+}
+
 export async function POST(request: Request) {
+  const startedAt = Date.now()
+  let stage = 'init'
   try {
+    stage = 'parse-form'
     const form = await request.formData()
     const video = form.get('video')
     const durationSeconds = Number(form.get('durationSeconds'))
@@ -78,19 +97,57 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'video size is outside the allowed range.' }, { status: 413 })
     }
 
+    const host = process.env.ACRCLOUD_HOST
+    const accessKey = process.env.ACRCLOUD_ACCESS_KEY
+    const accessSecret = process.env.ACRCLOUD_ACCESS_SECRET
+    console.info('[ACRCloud] identify-song start', {
+      vercel: process.env.VERCEL === '1',
+      region: process.env.VERCEL_REGION ?? null,
+      videoBytes: video.size,
+      videoName: video.name,
+      durationSeconds,
+      artist: artist || null,
+      hasHost: Boolean(host),
+      hasAccessKey: Boolean(accessKey),
+      hasAccessSecret: Boolean(accessSecret),
+      protocol: envProtocol() ?? (process.env.VERCEL === '1' ? 'https-first' : 'http-first'),
+    })
+
+    if (!host || !accessKey || !accessSecret) {
+      stage = 'env'
+      throw new Error('Missing ACRCLOUD_HOST / ACRCLOUD_ACCESS_KEY / ACRCLOUD_ACCESS_SECRET')
+    }
+
+    stage = 'ffmpeg'
     const extension = extname(video.name) || '.mp4'
     const clips = await extractVideoRecognitionWindows(
       Buffer.from(await video.arrayBuffer()),
       extension,
-      durationSeconds
+      durationSeconds,
+      undefined,
+      // Vercel: one window keeps ffmpeg + identify inside the function budget.
+      { maxWindows: process.env.VERCEL === '1' ? 1 : undefined }
     )
+
+    stage = 'acrcloud'
     const windowResults = await Promise.all(
-      clips.map(({ wav }) => recognizeAcrCloudWav(wav, {
-        host: process.env.ACRCLOUD_HOST,
-        accessKey: process.env.ACRCLOUD_ACCESS_KEY,
-        accessSecret: process.env.ACRCLOUD_ACCESS_SECRET,
-        protocol: process.env.ACRCLOUD_PROTOCOL === 'https' ? 'https' : 'http',
-      }))
+      clips.map(async ({ wav, targetTimeSeconds }, index) => {
+        const result = await recognizeAcrCloudWav(wav, {
+          host,
+          accessKey,
+          accessSecret,
+          protocol: envProtocol(),
+        })
+        console.info('[ACRCloud] window result', {
+          index,
+          targetTimeSeconds,
+          wavBytes: wav.length,
+          mode: result.mode ?? null,
+          candidateCount: result.candidates.length,
+          message: result.message ?? null,
+        })
+        return result
+      })
     )
     const expectedArtist = normalized(artist)
     const candidates = windowResults
@@ -115,14 +172,23 @@ export async function POST(request: Request) {
       expectedArtist: artist || null,
       candidates,
       trustedCandidates,
+      elapsedMs: Date.now() - startedAt,
     })
 
+    stage = 'qq-music'
     const mappedCandidates = await Promise.all(
       trustedCandidates.slice(0, 3).map(async (candidate) => {
         const tracks = await searchQQMusicSongs(
           `${candidate.title} ${candidate.artist}`.trim(),
           qqMusicConfigForRequest(request)
-        ).catch(() => [])
+        ).catch((error) => {
+          console.warn('[ACRCloud] QQ Music search failed', {
+            title: candidate.title,
+            artist: candidate.artist,
+            message: error instanceof Error ? error.message : String(error),
+          })
+          return []
+        })
         return bestQQTrack(tracks, candidate.title, candidate.artist)
       })
     )
@@ -139,6 +205,7 @@ export async function POST(request: Request) {
         songMid: mapped.songMid,
         hasPlayUrl: Boolean(mapped.playUrl),
         hasTryUrl: Boolean(mapped.tryUrl),
+        elapsedMs: Date.now() - startedAt,
       })
       return NextResponse.json({
         anchor: {
@@ -156,6 +223,7 @@ export async function POST(request: Request) {
     console.warn('[ACRCloud] no trusted QQ Music mapping', {
       candidateCount: candidates.length,
       trustedCandidateCount: trustedCandidates.length,
+      elapsedMs: Date.now() - startedAt,
     })
     return NextResponse.json({
       anchor: null,
@@ -164,14 +232,25 @@ export async function POST(request: Request) {
       message: candidates.length
         ? '识别到候选，但未达到艺人/置信度校验或未能映射到 QQ 音乐曲目。'
         : '未从现场音频中获得可靠歌曲匹配。',
+      failureStage: candidates.length ? 'qq-music-or-threshold' : 'acrcloud-no-match',
     })
   } catch (error) {
-    console.error('[ACRCloud] recognition failed', error)
+    const detail = sanitizeDetail(error instanceof Error ? error.message : 'Song recognition failed.')
+    console.error('[ACRCloud] recognition failed', {
+      stage,
+      detail,
+      elapsedMs: Date.now() - startedAt,
+      vercel: process.env.VERCEL === '1',
+      region: process.env.VERCEL_REGION ?? null,
+      error,
+    })
     return NextResponse.json({
       anchor: null,
       candidates: [],
       source: 'fallback',
       message: '未从现场音频中获得可靠歌曲匹配。',
+      failureStage: stage,
+      failureDetail: detail,
     })
   }
 }

@@ -347,8 +347,16 @@ export function useMemoryPipeline() {
 
       const identifyPromise = input.media.video
         ? (() => {
+            const videoFile = input.media.video as File
+            console.info('[ACRCloud] uploading video for identify-song', {
+              name: videoFile.name,
+              type: videoFile.type,
+              bytes: videoFile.size,
+              durationSeconds: input.media.videoDuration ?? 0,
+              artist: input.concertInfo.artist || null,
+            })
             const body = new FormData()
-            body.append('video', input.media.video as File)
+            body.append('video', videoFile)
             body.append('durationSeconds', String(input.media.videoDuration ?? 0))
             body.append('artist', input.concertInfo.artist)
             return fetch('/api/identify-song', {
@@ -361,6 +369,8 @@ export function useMemoryPipeline() {
                 candidates?: Array<{ title?: string; artist?: string; confidence?: number; recognitionType?: string }>
                 source?: string
                 message?: string
+                failureStage?: string
+                failureDetail?: string
               }>(response))
               .then((result) => {
                 const candidates = result.candidates ?? []
@@ -373,6 +383,8 @@ export function useMemoryPipeline() {
                 console.log('source:', result.source ?? 'unknown')
                 console.log('confidence:', topConfidence ?? 'n/a')
                 console.log('message:', result.message ?? '')
+                if (result.failureStage) console.log('failureStage:', result.failureStage)
+                if (result.failureDetail) console.log('failureDetail:', result.failureDetail)
                 console.table(candidates.map((item) => ({
                   title: item.title ?? '',
                   artist: item.artist ?? '',

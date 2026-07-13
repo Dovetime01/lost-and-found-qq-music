@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { chmodSync, existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { extname, join } from 'node:path'
@@ -61,7 +61,7 @@ export const runProcess: ProcessRunner = (executable, args, options = {}) => new
     if (settled) return
     settled = true
     clearTimeout(timeout)
-    reject(error)
+    reject(new Error(`Unable to start ffmpeg (${executable}): ${error.message}`))
   })
   child.once('close', (code) => {
     if (settled) return
@@ -86,7 +86,34 @@ export function resolveFfmpegPath(
     join(cwd, 'node_modules', 'ffmpeg-static', executable),
   ].filter((candidate): candidate is string => Boolean(candidate))
   const resolved = candidates.find((candidate) => exists(candidate))
-  if (!resolved) throw new Error('ffmpeg-static binary is unavailable on this platform')
+  if (!resolved) {
+    console.error('[media] ffmpeg binary missing', {
+      platform: process.platform,
+      arch: process.arch,
+      cwd,
+      candidates,
+      vercel: process.env.VERCEL === '1',
+    })
+    throw new Error('ffmpeg-static binary is unavailable on this platform')
+  }
+
+  // Vercel / Lambda often strips the executable bit from traced native binaries.
+  if (process.platform !== 'win32') {
+    try {
+      chmodSync(resolved, 0o755)
+    } catch (error) {
+      console.warn('[media] ffmpeg chmod failed', {
+        path: resolved,
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  console.info('[media] ffmpeg resolved', {
+    path: resolved,
+    platform: process.platform,
+    arch: process.arch,
+  })
   return resolved
 }
 
@@ -155,16 +182,35 @@ export async function extractVideoRecognitionWindows(
   input: Buffer,
   extension: string,
   durationSeconds: number,
-  runner: ProcessRunner = runProcess
+  runner: ProcessRunner = runProcess,
+  options: { maxWindows?: number } = {}
 ) {
-  const targets = recognitionWindowTargets(durationSeconds)
-  if (!targets.length) throw new Error('Video duration must be greater than zero')
+  const allTargets = recognitionWindowTargets(durationSeconds)
+  if (!allTargets.length) throw new Error('Video duration must be greater than zero')
+  const maxWindows = options.maxWindows && options.maxWindows > 0
+    ? options.maxWindows
+    : allTargets.length
+  // Prefer the middle window when we have to trim for serverless time limits.
+  const targets = allTargets.length <= maxWindows
+    ? allTargets
+    : [allTargets[Math.floor(allTargets.length / 2)]!]
+  console.info('[media] recognition windows', {
+    durationSeconds,
+    extension,
+    inputBytes: input.length,
+    targets,
+    maxWindows,
+  })
   const clips: Array<{ targetTimeSeconds: number; wav: Buffer }> = []
   for (const targetTimeSeconds of targets) {
-    clips.push({
+    const startedAt = Date.now()
+    const wav = await extractVideoAudio(input, extension, targetTimeSeconds, runner)
+    console.info('[media] clip ready', {
       targetTimeSeconds,
-      wav: await extractVideoAudio(input, extension, targetTimeSeconds, runner),
+      wavBytes: wav.length,
+      elapsedMs: Date.now() - startedAt,
     })
+    clips.push({ targetTimeSeconds, wav })
   }
   return clips
 }

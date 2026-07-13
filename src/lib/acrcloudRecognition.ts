@@ -97,15 +97,43 @@ function buildSignature(
     .digest('base64')
 }
 
-async function identifyAudioHttp(wav: Buffer, config: AcrCloudConfig): Promise<unknown> {
+function protocolCandidates(preferred?: 'http' | 'https'): Array<'http' | 'https'> {
+  if (preferred === 'http') return ['http', 'https']
+  if (preferred === 'https') return ['https', 'http']
+  // Vercel egress is more reliable over HTTPS; local China setups often use HTTP.
+  return process.env.VERCEL === '1' ? ['https', 'http'] : ['http', 'https']
+}
+
+function isRetryableNetworkError(error: unknown) {
+  if (!(error instanceof Error)) return false
+  const message = error.message.toLowerCase()
+  return (
+    error.name === 'TypeError'
+    || error.name === 'AbortError'
+    || message.includes('fetch failed')
+    || message.includes('econnrefused')
+    || message.includes('enotfound')
+    || message.includes('etimedout')
+    || message.includes('network')
+    || message.includes('socket')
+    || message.includes('ssl')
+    || message.includes('certificate')
+  )
+}
+
+async function identifyAudioHttpOnce(
+  wav: Buffer,
+  config: AcrCloudConfig,
+  protocol: 'http' | 'https'
+): Promise<unknown> {
   const host = normalizeHost(text(config.host))
   const accessKey = text(config.accessKey)
   const accessSecret = text(config.accessSecret)
-  const protocol = config.protocol ?? 'https'
   const dataType = 'audio'
   const timestamp = String(Date.now() / 1000)
   const signature = buildSignature(accessKey, accessSecret, dataType, timestamp)
   const fetchImpl = config.fetchImpl ?? fetch
+  const url = `${protocol}://${host}${IDENTIFY_PATH}`
 
   const form = new FormData()
   form.append('sample', new Blob([new Uint8Array(wav)], { type: 'audio/wav' }), 'sample.wav')
@@ -118,8 +146,17 @@ async function identifyAudioHttp(wav: Buffer, config: AcrCloudConfig): Promise<u
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), config.timeoutMs ?? 25_000)
+  const startedAt = Date.now()
   try {
-    const response = await fetchImpl(`${protocol}://${host}${IDENTIFY_PATH}`, {
+    console.info('[ACRCloud] identify request', {
+      url,
+      wavBytes: wav.length,
+      host,
+      protocol,
+      hasAccessKey: Boolean(accessKey),
+      hasAccessSecret: Boolean(accessSecret),
+    })
+    const response = await fetchImpl(url, {
       method: 'POST',
       body: form,
       signal: controller.signal,
@@ -130,25 +167,60 @@ async function identifyAudioHttp(wav: Buffer, config: AcrCloudConfig): Promise<u
     try {
       payload = JSON.parse(body) as unknown
     } catch {
+      console.error('[ACRCloud] non-JSON response', {
+        url,
+        httpStatus: response.status,
+        elapsedMs: Date.now() - startedAt,
+        bodyPreview: body.slice(0, 180),
+      })
       throw new Error(
         response.ok
           ? 'ACRCloud returned a non-JSON response'
           : `ACRCloud HTTP ${response.status}: ${body.slice(0, 180)}`
       )
     }
+    const status = statusOf(payload)
+    console.info('[ACRCloud] identify response', {
+      url,
+      httpStatus: response.status,
+      elapsedMs: Date.now() - startedAt,
+      code: number(status?.code) ?? null,
+      msg: text(status?.msg) || null,
+    })
     if (!response.ok) {
-      const message = text(statusOf(payload)?.msg) || body.slice(0, 180)
+      const message = text(status?.msg) || body.slice(0, 180)
       throw new Error(`ACRCloud HTTP ${response.status}${message ? `: ${message}` : ''}`)
     }
     return payload
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('ACRCloud music SDK timed out')
+      throw new Error('ACRCloud music identify timed out')
     }
     throw error
   } finally {
     clearTimeout(timeout)
   }
+}
+
+async function identifyAudioHttp(wav: Buffer, config: AcrCloudConfig): Promise<unknown> {
+  const protocols = protocolCandidates(config.protocol)
+  let lastError: unknown
+  for (const [index, protocol] of protocols.entries()) {
+    try {
+      return await identifyAudioHttpOnce(wav, config, protocol)
+    } catch (error) {
+      lastError = error
+      const canRetry = index < protocols.length - 1 && isRetryableNetworkError(error)
+      console.warn('[ACRCloud] identify attempt failed', {
+        protocol,
+        willRetry: canRetry,
+        nextProtocol: canRetry ? protocols[index + 1] : null,
+        message: error instanceof Error ? error.message : String(error),
+      })
+      if (!canRetry) throw error
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('ACRCloud identify failed')
 }
 
 function interpretPayload(
