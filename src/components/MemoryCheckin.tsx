@@ -235,7 +235,7 @@ export default function MemoryCheckin({ onNext }: MemoryCheckinProps) {
     <div className="relative h-full min-h-full overflow-x-hidden overflow-y-auto bg-[#06080e]">
       <StarrySeaBackground />
 
-      {/* === 胶片颗粒 === */}
+      {/* === 胶片颗粒1 === */}
       <div
         className="pointer-events-none absolute inset-0 z-50 opacity-[0.08]"
         style={{
