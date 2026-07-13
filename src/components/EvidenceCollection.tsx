@@ -56,7 +56,7 @@ const STRING_POINTS: Record<EvidenceKind, { x: number; y: number }> = {
 
 const LIMITS = {
   photo: 12 * 1024 * 1024,
-  video: 150 * 1024 * 1024,
+  video: 4.5 * 1024 * 1024,
   voice: 20 * 1024 * 1024,
 }
 
@@ -175,7 +175,11 @@ export default function EvidenceCollection({ onNext }: EvidenceCollectionProps) 
       return `请选择${kind === 'voice' ? '音频' : kind === 'photo' ? '图片' : '视频'}文件。`
     }
     const limit = LIMITS[kind as keyof typeof LIMITS]
-    if (limit && file.size > limit) return `文件过大：${kind === 'video' ? '视频上限 150MB' : kind === 'photo' ? '照片上限 12MB' : '声音上限 20MB'}。`
+    if (limit && file.size > limit) {
+      return kind === 'video'
+        ? '视频不能超过 4.5MB，请压缩后重新上传。'
+        : `文件过大：${kind === 'photo' ? '照片上限 12MB' : '声音上限 20MB'}。`
+    }
     return ''
   }
 
@@ -581,7 +585,7 @@ export default function EvidenceCollection({ onNext }: EvidenceCollectionProps) 
           {selected.length ? `提交线索 · ${selected.length} 件` : '钉一件线索上墙'}
         </button>
         <p className="mt-2.5 text-center text-[11px] text-archive-paper/40">
-          照片 ≤12MB · 视频 ≤150MB · 声音 ≤20MB · 录音最长 45 秒
+          照片 ≤12MB · 视频 ≤4.5MB · 声音 ≤20MB · 录音最长 45 秒
         </p>
       </div>
 
@@ -646,7 +650,7 @@ export default function EvidenceCollection({ onNext }: EvidenceCollectionProps) 
                     {isPreparing ? '正在读取文件…' : editingValue ? '更换文件' : '选择文件'}
                   </button>
                   {editingValue && <button type="button" onClick={() => { remove(editing); closeModal() }} className="w-full py-2 text-sm text-red-900/70">删除</button>}
-                  <p className="text-xs text-[#3B2A22]/55">{editing === 'video' ? '将在浏览器本地截取视频50%处画面，并记录时长。' : '支持 JPG、PNG、WebP。'}</p>
+                  <p className="text-xs text-[#3B2A22]/55">{editing === 'video' ? '视频需小于 4.5MB；将在浏览器本地截取50%处画面并记录时长。' : '支持 JPG、PNG、WebP。'}</p>
                 </div>
               )}
 

@@ -47,6 +47,7 @@ export default function PlaybackScreen({ profile, radio, onNext }: PlaybackScree
   const [audioError, setAudioError] = useState('')
   const song = playlist[index]
   const playUrl = song?.playUrl || song?.tryUrl
+  const canPlay = Boolean(playUrl) && !audioError
   const isPreview = Boolean(song?.tryUrl && !song?.playUrl)
 
   useEffect(() => {
@@ -63,10 +64,7 @@ export default function PlaybackScreen({ profile, radio, onNext }: PlaybackScree
 
   const toggle = async () => {
     const audio = audioRef.current
-    if (!audio || !playUrl) {
-      setAudioError('这首歌暂无可播放链接，可前往曲库查看。')
-      return
-    }
+    if (!audio || !canPlay) return
     if (!audio.paused) {
       audio.pause()
       return
@@ -75,7 +73,7 @@ export default function PlaybackScreen({ profile, radio, onNext }: PlaybackScree
       await audio.play()
       stopBgmForever()
     } catch {
-      setAudioError('浏览器未允许播放，请再次点击。')
+      setAudioError('playback-failed')
     }
   }
 
@@ -112,7 +110,7 @@ export default function PlaybackScreen({ profile, radio, onNext }: PlaybackScree
           }}
           onError={() => {
             setPlaying(false)
-            setAudioError('试听链接加载失败，可继续查看推荐。')
+            setAudioError('playback-failed')
           }}
         />
       )}
@@ -162,7 +160,13 @@ export default function PlaybackScreen({ profile, radio, onNext }: PlaybackScree
 
       <div className="relative z-10 mt-5 flex items-center justify-center gap-8">
         <button type="button" onClick={() => changeSong(-1)} disabled={playlist.length < 2} aria-label="上一首" className="text-xl disabled:opacity-25">‹‹</button>
-        <button type="button" onClick={toggle} aria-label={playing ? '暂停' : '播放'} className="h-14 w-14 rounded-full bg-[#7ECFD3] text-xl text-[#0D1B2A] shadow-[0_0_30px_rgba(126,207,211,0.45)]">
+        <button
+          type="button"
+          onClick={toggle}
+          disabled={!canPlay}
+          aria-label={playing ? '暂停' : '播放'}
+          className="h-14 w-14 rounded-full bg-[#7ECFD3] text-xl text-[#0D1B2A] shadow-[0_0_30px_rgba(126,207,211,0.45)] disabled:cursor-not-allowed disabled:border disabled:border-archive-paper/15 disabled:bg-archive-paper/10 disabled:text-archive-paper/25 disabled:shadow-none"
+        >
           {playing ? 'Ⅱ' : '▶'}
         </button>
         <button type="button" onClick={() => changeSong(1)} disabled={playlist.length < 2} aria-label="下一首" className="text-xl disabled:opacity-25">››</button>
@@ -173,12 +177,6 @@ export default function PlaybackScreen({ profile, radio, onNext }: PlaybackScree
           当前账号暂无该歌曲 VIP 完整播放权益，现可试听 1 分钟
         </p>
       )}
-      {!playUrl && (
-        <p className="relative z-10 mt-3 text-center text-[11px] text-archive-paper/42">
-          当前歌曲未返回任何可播放或试听音频，仅展示推荐结果。
-        </p>
-      )}
-      {audioError && <p role="alert" className="relative z-10 mt-2 text-center text-[11px] text-red-200/65">{audioError}</p>}
       {song.qqMusicUrl && (
         <a
           href={song.qqMusicUrl}
