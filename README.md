@@ -6,6 +6,8 @@
 
 URL：[https://lost-and-found-qq-music.vercel.app/](https://lost-and-found-qq-music.vercel.app/)
 
+> 访问提示：网站部署于 Vercel。部分网络环境下可能无法直接打开，如遇访问失败，请尝试使用 VPN 或代理网络后重新访问。
+
 ## 环境
 
 - Node.js 20 或以上
