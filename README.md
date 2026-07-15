@@ -14,9 +14,9 @@ URL：[https://lost-and-found-qq-music.vercel.app/](https://lost-and-found-qq-mu
 
 团队来自 [宁波诺丁汉大学](https://www.nottingham.edu.cn/) 乐队俱乐部，成员：
 
-1. [王艺勤](https://github.com/QQB2004)
-2. [王亮立](https://github.com/Dovetime01)
-3. [靳雨泽](https://github.com/rainjin-moon)
+1. 王艺勤 ([@QQB2004](https://github.com/QQB2004))
+2. 王亮立 ([@Dovetime01](https://github.com/Dovetime01))
+3. 靳雨泽 ([@rainjin-moon](https://github.com/rainjin-moon))
 
 ## 环境
 
