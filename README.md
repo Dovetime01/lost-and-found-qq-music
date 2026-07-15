@@ -8,6 +8,16 @@ URL：[https://lost-and-found-qq-music.vercel.app/](https://lost-and-found-qq-mu
 
 > 访问提示：网站部署于 Vercel。部分网络环境下可能无法直接打开，如遇访问失败，请尝试使用 VPN 或代理网络后重新访问。
 
+## 荣誉与团队
+
+本项目获得 **腾讯音乐 AI Hackathon 2026 二等奖**。
+
+团队来自 [宁波诺丁汉大学](https://www.nottingham.edu.cn/) 乐队俱乐部，成员：
+
+1. [王艺勤](https://github.com/QQB2004)
+2. [王亮立](https://github.com/Dovetime01)
+3. [靳雨泽](https://github.com/rainjin-moon)
+
 ## 环境
 
 - Node.js 20 或以上
