@@ -12,7 +12,7 @@ URL：[https://lost-and-found-qq-music.vercel.app/](https://lost-and-found-qq-mu
 
 本项目获得 **腾讯音乐 AI Hackathon 2026 二等奖🥈**。
 
-团队来自 [宁波诺丁汉大学](https://www.nottingham.edu.cn/) 乐队俱乐部，成员：
+团队来自 宁波诺丁汉大学乐队俱乐部，成员：
 
 1. 王艺勤 ([@QQB2004](https://github.com/QQB2004))
 2. 王亮立 ([@Dovetime01](https://github.com/Dovetime01))
