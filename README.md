@@ -28,6 +28,8 @@ ACRCloud 识曲走服务端 HTTP Identify API，**不需要**本机 Python。
 
 ## 本地运行
 
+> 本地构建说明：本仓库不包含 `.env.local`（API 配置文件）。如需获取配置以完成本地运行，可发邮件至 [2647903697@qq.com](mailto:2647903697@qq.com) 并说明来意。
+
 在项目根目录按顺序执行：
 
 ### 1. 安装依赖
@@ -56,9 +58,7 @@ Copy-Item .env.local.example .env.local
 
 打开 `.env.local`，按 [`.env.local.example`](.env.local.example) 填入密钥。  
 完整演示需要票根识别、多模态分析、QQ 音乐、ACRCloud、失物墙等配置项。  
-**不要把 `.env.local` 提交到公开仓库。**
-
-> 本地构建说明：本仓库不包含 `.env.local`（API 配置文件）。如需获取配置以完成本地运行，可发邮件至 [2647903697@qq.com](mailto:2647903697@qq.com) 并说明来意。  
+**不要把 `.env.local` 提交到公开仓库。**  
 上线 Vercel 时只配置 `ACRCLOUD_HOST` / `ACRCLOUD_ACCESS_KEY` / `ACRCLOUD_ACCESS_SECRET`（及可选 `ACRCLOUD_PROTOCOL`），**不要**配置本机 `ACRCLOUD_PYTHON_PATH`。  
 识曲接口依赖 `ffmpeg-static`，已在 `next.config.js` / `vercel.json` 中为 Serverless 打包与加长超时。  
 注意：Vercel Serverless 请求体默认约 **4.5MB**，过大的现场视频会在进到业务逻辑前失败。
