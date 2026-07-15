@@ -96,6 +96,11 @@ export default function ListenFirstScreen({
         >
           {playing ? 'Ⅱ' : '▶'}
         </button>
+        {!canPlay && (
+          <p className="mt-2 text-[11px] leading-5 text-archive-paper/42">
+            目前歌曲尚未属于qq音乐开放api歌曲库，暂时无法播放
+          </p>
+        )}
         {isPreview && (
           <p className="mt-2 text-[11px] text-archive-gold/65">
             当前账号暂无该歌曲 VIP 完整播放权益，现可试听 1 分钟

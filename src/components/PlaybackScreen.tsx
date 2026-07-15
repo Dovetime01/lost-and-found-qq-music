@@ -139,6 +139,11 @@ export default function PlaybackScreen({ profile, radio, onNext }: PlaybackScree
         <button type="button" onClick={() => changeSong(1)} disabled={playlist.length < 2} aria-label="下一首" className="text-xl disabled:opacity-25">››</button>
       </div>
 
+      {!canPlay && (
+        <p className="relative z-10 mt-3 text-center text-[11px] leading-5 text-archive-paper/42">
+          目前歌曲尚未属于qq音乐开放api歌曲库，暂时无法播放
+        </p>
+      )}
       {isPreview && (
         <p className="relative z-10 mt-3 text-center text-[11px] text-archive-gold/70">
           当前账号暂无该歌曲 VIP 完整播放权益，现可试听 1 分钟

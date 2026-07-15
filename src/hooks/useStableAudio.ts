@@ -71,11 +71,6 @@ export function useStableAudio(
     const onLoadedMetadata = () => setDuration(Number.isFinite(audio.duration) ? audio.duration : 0)
     const onError = () => {
       if (audio.error?.code === 1) return
-      console.error('[播放] stable audio media error', {
-        code: audio.error?.code ?? null,
-        message: audio.error?.message ?? null,
-        src: loadedSrcRef.current.slice(0, 96) || null,
-      })
       setFailed(true)
       setPlaying(false)
       wantPlayRef.current = false
@@ -138,7 +133,6 @@ export function useStableAudio(
           }, 60)
           return
         }
-        console.error('[播放] resume after src change failed', error)
       })
     }
   }, [src])
@@ -161,19 +155,10 @@ export function useStableAudio(
         await new Promise((resolve) => window.setTimeout(resolve, 60))
         try {
           return await tryPlay()
-        } catch (retryError) {
-          console.warn('[播放] retry after AbortError failed', {
-            message: retryError instanceof Error ? retryError.message : String(retryError),
-            urlPreview: loadedSrcRef.current.slice(0, 96) || null,
-          })
+        } catch {
           return false
         }
       }
-      console.error('[播放] play() failed', {
-        message: error instanceof Error ? error.message : String(error),
-        name: error instanceof Error ? error.name : null,
-        urlPreview: loadedSrcRef.current.slice(0, 96) || null,
-      })
       setFailed(true)
       wantPlayRef.current = false
       return false
@@ -183,11 +168,6 @@ export function useStableAudio(
   const toggle = useCallback(async () => {
     const audio = audioRef.current
     if (!audio || !loadedSrcRef.current || failed) {
-      console.warn('[播放] toggle blocked', {
-        hasAudio: Boolean(audio),
-        hasSrc: Boolean(loadedSrcRef.current),
-        failed,
-      })
       return
     }
     if (!audio.paused) {
