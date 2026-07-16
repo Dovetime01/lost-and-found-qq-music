@@ -10,7 +10,7 @@ URL：[https://lost-and-found-qq-music.vercel.app/](https://lost-and-found-qq-mu
 
 ## 荣誉与团队
 
-本项目获得 **腾讯音乐 AI Hackathon 2026 二等奖🥈**。
+本项目获得 **腾讯音乐 AI Hackathon 2026 二等奖 (top3)🥈**。
 
 团队来自 宁波诺丁汉大学乐队俱乐部，成员：
 
